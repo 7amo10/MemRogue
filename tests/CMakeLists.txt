@@ -1,2 +1,3 @@
-# Tests CMakeLists.txt
-# Placeholder for future tests
+add_executable(test_hash_table test_hash_table.c)
+target_link_libraries(test_hash_table PRIVATE memrogue)
+add_test(NAME HashTableTest COMMAND test_hash_table)

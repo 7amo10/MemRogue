@@ -27,7 +27,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # Include Directories
 include_directories(include)
 
-# Source Files (Placeholder for now, will populate as we add files)
+# Source Files
 file(GLOB_RECURSE SOURCES "src/*.c" "src/*.cpp")
 
 # Library Target
@@ -36,6 +36,7 @@ target_include_directories(memrogue PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
+target_link_libraries(memrogue PRIVATE pthread)
 
 # Alias for easier usage
 add_library(MemRogue::memrogue ALIAS memrogue)
