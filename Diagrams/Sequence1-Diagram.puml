@@ -1,0 +1,119 @@
+@startuml Memory_Allocation_Sequence
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 10
+skinparam maxmessagesize 200
+skinparam sequenceParticipant underline
+
+actor "User Application" as App
+participant "malloc_wrapper" as Malloc
+participant "Config Manager" as Config
+participant "Thread Lock" as Lock
+participant "Backtrace Capture" as BTrace
+participant "Symbol Resolver" as Resolver
+participant "Hash Table" as Hash
+participant "Allocation Tracker" as Tracker
+participant "System malloc" as SysMalloc
+participant "Statistics" as Stats
+
+== Allocation Request ==
+
+App -> Malloc: malloc(1024)
+activate Malloc
+
+Malloc -> Config: is_enabled()
+activate Config
+Config --> Malloc: true
+deactivate Config
+
+Malloc -> Config: should_track()
+activate Config
+note right
+    Check sampling rate,
+    filters, etc.
+end note
+Config --> Malloc: true
+deactivate Config
+
+Malloc -> Lock: acquire_lock()
+activate Lock
+note right
+    Ensure thread-safety
+    for tracking operations
+end note
+
+Malloc -> SysMalloc: malloc(1024)
+activate SysMalloc
+SysMalloc --> Malloc: ptr=0x7fff1234
+deactivate SysMalloc
+
+alt Allocation Successful
+    Malloc -> BTrace: capture_backtrace()
+    activate BTrace
+    
+    BTrace -> BTrace: backtrace(frames, 16)
+    BTrace -> Resolver: resolve_symbols(frames)
+    activate Resolver
+    
+    Resolver -> Resolver: backtrace_symbols()
+    note right
+        Convert addresses to
+        function names/files
+    end note
+    Resolver --> BTrace: symbol_info[]
+    deactivate Resolver
+    
+    BTrace --> Malloc: stack_trace
+    deactivate BTrace
+    
+    Malloc -> Tracker: create_allocation_record()
+    activate Tracker
+    
+    Tracker -> Tracker: allocate_metadata()
+    note right
+        allocation_info_t {
+            address: 0x7fff1234
+            size: 1024
+            timestamp: 1732558800
+            backtrace: [...]
+        }
+    end note
+    
+    Tracker -> Hash: insert(ptr, record)
+    activate Hash
+    
+    Hash -> Hash: hash_function(ptr)
+    Hash -> Hash: handle_collision()
+    Hash --> Tracker: success
+    deactivate Hash
+    
+    Tracker -> Stats: update_stats()
+    activate Stats
+    Stats -> Stats: total_allocations++
+    Stats -> Stats: current_memory += size
+    Stats -> Stats: update_peak_memory()
+    Stats --> Tracker: updated
+    deactivate Stats
+    
+    Tracker --> Malloc: record_created
+    deactivate Tracker
+    
+else Allocation Failed
+    Malloc -> Malloc: log_error()
+    note right
+        Handle allocation failure
+        without tracking
+    end note
+end
+
+Malloc -> Lock: release_lock()
+deactivate Lock
+
+Malloc --> App: ptr=0x7fff1234
+deactivate Malloc
+
+== Later: User Uses Memory ==
+App -> App: strcpy(ptr, "data")
+
+@enduml
+

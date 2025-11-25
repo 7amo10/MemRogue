@@ -1,0 +1,74 @@
+@startuml Tracking_Workflow
+
+start
+
+:Application calls malloc();
+
+if (Debugger enabled?) then (yes)
+    :Intercept allocation;
+    
+    if (Should track? (sampling)) then (yes)
+        :Acquire thread lock;
+        
+        :Call system malloc();
+        
+        if (Allocation successful?) then (yes)
+            :Capture backtrace;
+            
+            fork
+                :Resolve symbols;
+            fork again
+                :Create allocation record;
+            end fork
+            
+            :Insert into hash table;
+            :Update statistics;
+            :Release thread lock;
+            :Return pointer to app;
+        else (no)
+            :Release thread lock;
+            :Return NULL;
+        endif
+    else (no)
+        :Call system malloc directly;
+        :Return pointer;
+    endif
+else (no)
+    :Call system malloc directly;
+    :Return pointer;
+endif
+
+:Application uses memory;
+
+:Application calls free();
+
+if (Debugger enabled?) then (yes)
+    :Intercept deallocation;
+    :Acquire thread lock;
+    
+    :Lookup pointer in hash table;
+    
+    if (Pointer found?) then (yes)
+        if (Already freed?) then (yes)
+            :Report double free error;
+            :Release lock;
+            stop
+        else (no)
+            :Remove from hash table;
+            :Update statistics;
+            :Call system free();
+            :Release lock;
+        endif
+    else (no)
+        :Report invalid free;
+        :Release lock;
+        stop
+    endif
+else (no)
+    :Call system free directly;
+endif
+
+stop
+
+@enduml
+

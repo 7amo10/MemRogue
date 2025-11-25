@@ -1,0 +1,52 @@
+@startuml Allocation_State_Diagram
+
+[*] --> Unallocated
+
+Unallocated --> Allocating : malloc(size)
+
+state Allocating {
+    [*] --> RequestingMemory
+    RequestingMemory --> CreatingMetadata : allocation succeeded
+    RequestingMemory --> [*] : allocation failed
+    CreatingMetadata --> CapturingBacktrace
+    CapturingBacktrace --> InsertingRecord
+    InsertingRecord --> [*]
+}
+
+Allocating --> Tracked : record created
+
+state Tracked {
+    [*] --> Active
+    Active --> Active : pointer in use
+    Active --> BeingModified : realloc() called
+    BeingModified --> Active : reallocation succeeded
+    BeingModified --> [*] : reallocation failed
+}
+
+Tracked --> Deallocating : free(ptr)
+
+state Deallocating {
+    [*] --> ValidatingPointer
+    ValidatingPointer --> RemovingRecord : valid pointer
+    ValidatingPointer --> ReportingError : invalid pointer
+    RemovingRecord --> ReleasingMemory
+    ReleasingMemory --> [*]
+    ReportingError --> [*]
+}
+
+Deallocating --> Unallocated : freed successfully
+Deallocating --> Error : double free / invalid free
+
+Tracked --> Leaked : program exit without free()
+
+state Leaked {
+    [*] --> Detected
+    Detected --> Reported : leak detection runs
+    Reported --> [*]
+}
+
+Error --> [*]
+Leaked --> [*]
+
+@enduml
+
