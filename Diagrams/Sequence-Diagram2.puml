@@ -1,0 +1,115 @@
+@startuml Memory_Deallocation_Sequence
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 10
+skinparam maxmessagesize 200
+
+actor "User Application" as App
+participant "free_wrapper" as Free
+participant "Thread Lock" as Lock
+participant "Hash Table" as Hash
+participant "Allocation Tracker" as Tracker
+participant "Leak Detector" as LeakDet
+participant "Statistics" as Stats
+participant "System free" as SysFree
+
+== Deallocation Request ==
+
+App -> Free: free(0x7fff1234)
+activate Free
+
+Free -> Lock: acquire_lock()
+activate Lock
+
+Free -> Hash: lookup(0x7fff1234)
+activate Hash
+
+Hash -> Hash: compute_hash(0x7fff1234)
+Hash -> Hash: search_bucket()
+
+alt Allocation Found
+    Hash --> Free: allocation_record
+    deactivate Hash
+    
+    Free -> Tracker: validate_allocation()
+    activate Tracker
+    
+    Tracker -> Tracker: check_double_free()
+    Tracker -> Tracker: check_corruption()
+    
+    alt Valid Deallocation
+        Tracker --> Free: valid
+        deactivate Tracker
+        
+        Free -> Hash: remove(0x7fff1234)
+        activate Hash
+        Hash -> Hash: unlink_from_chain()
+        Hash --> Free: removed
+        deactivate Hash
+        
+        Free -> Stats: update_stats()
+        activate Stats
+        Stats -> Stats: current_allocations--
+        Stats -> Stats: current_memory -= size
+        Stats -> Stats: total_deallocations++
+        Stats --> Free: updated
+        deactivate Stats
+        
+        Free -> SysFree: free(0x7fff1234)
+        activate SysFree
+        SysFree --> Free: freed
+        deactivate SysFree
+        
+        Free -> Lock: release_lock()
+        deactivate Lock
+        
+        Free --> App: success
+        
+    else Double Free Detected
+        Tracker --> Free: ERROR: double_free
+        deactivate Tracker
+        
+        Free -> LeakDet: report_double_free()
+        activate LeakDet
+        LeakDet -> LeakDet: log_violation()
+        LeakDet -> LeakDet: generate_backtrace()
+        LeakDet --> Free: reported
+        deactivate LeakDet
+        
+        Free -> Lock: release_lock()
+        deactivate Lock
+        
+        Free --> App: ERROR
+        note right
+            Optionally abort()
+            based on config
+        end note
+    end
+    
+else Allocation Not Found
+    Hash --> Free: NULL
+    deactivate Hash
+    
+    Free -> LeakDet: report_invalid_free()
+    activate LeakDet
+    
+    LeakDet -> LeakDet: log_violation()
+    note right
+        Attempt to free pointer
+        that was never allocated
+        or already freed
+    end note
+    
+    LeakDet --> Free: reported
+    deactivate LeakDet
+    
+    Free -> Lock: release_lock()
+    deactivate Lock
+    
+    Free --> App: ERROR
+end
+
+deactivate Free
+
+@enduml
+

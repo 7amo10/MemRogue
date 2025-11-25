@@ -1,0 +1,111 @@
+@startuml Leak_Detection_Sequence
+
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 10
+skinparam maxmessagesize 200
+
+participant "Exit Hook" as Exit
+participant "Leak Detector" as LeakDet
+participant "Hash Table" as Hash
+participant "Allocation Tracker" as Tracker
+participant "Statistics" as Stats
+participant "Report Generator" as Report
+participant "Output Formatter" as Format
+participant "File System" as FS
+
+== Program Termination ==
+
+activate Exit
+Exit -> LeakDet: detect_leaks()
+activate LeakDet
+
+LeakDet -> Hash: get_all_allocations()
+activate Hash
+
+Hash -> Hash: iterate_all_buckets()
+
+loop For Each Bucket
+    Hash -> Hash: traverse_chain()
+end
+
+Hash --> LeakDet: active_allocations[]
+deactivate Hash
+
+LeakDet -> LeakDet: filter_false_positives()
+note right
+    Skip known globals,
+    static allocations, etc.
+end note
+
+LeakDet -> LeakDet: group_by_allocation_site()
+note right
+    Group leaks by
+    backtrace signature
+end note
+
+LeakDet -> Stats: calculate_leak_stats()
+activate Stats
+
+Stats -> Stats: total_leaked_bytes = sum(sizes)
+Stats -> Stats: total_leaked_blocks = count()
+Stats -> Stats: unique_leak_sites = unique(backtraces)
+
+Stats --> LeakDet: leak_statistics
+deactivate Stats
+
+LeakDet -> Tracker: get_lifetime_stats()
+activate Tracker
+
+Tracker --> LeakDet: lifetime_statistics
+deactivate Tracker
+
+LeakDet --> Exit: leak_data
+deactivate LeakDet
+
+Exit -> Report: generate_report(leak_data)
+activate Report
+
+Report -> Report: create_summary()
+Report -> Report: create_detailed_leaks()
+
+loop For Each Leak Group
+    Report -> Report: format_leak_entry()
+    Report -> Report: format_backtrace()
+    Report -> Report: calculate_percentages()
+end
+
+Report -> Format: format_text(report)
+activate Format
+
+Format -> Format: create_header()
+Format -> Format: format_statistics()
+Format -> Format: format_leak_list()
+Format -> Format: create_footer()
+
+Format --> Report: formatted_text
+deactivate Format
+
+Report -> FS: write_to_file("/tmp/memdebug.log")
+activate FS
+FS --> Report: written
+deactivate FS
+
+Report -> Report: print_to_stderr()
+note right
+    Optional: also print
+    summary to console
+end note
+
+Report --> Exit: report_generated
+deactivate Report
+
+Exit -> Exit: cleanup_debugger()
+note right
+    Free internal structures,
+    release resources
+end note
+
+deactivate Exit
+
+@enduml
+

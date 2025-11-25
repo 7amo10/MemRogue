@@ -1,0 +1,133 @@
+@startuml Memory_Debugger_Components
+
+!define COMPONENT_COLOR #4A90E2
+!define DATABASE_COLOR #50C878
+!define INTERFACE_COLOR #F5A623
+
+skinparam component {
+    BackgroundColor COMPONENT_COLOR
+    BorderColor #2E5C8A
+    FontColor white
+}
+
+skinparam database {
+    BackgroundColor DATABASE_COLOR
+    BorderColor #2E8B57
+}
+
+skinparam interface {
+    BackgroundColor INTERFACE_COLOR
+    BorderColor #D68910
+}
+
+package "Application Layer" {
+    [User Application] as App
+    note right of App
+        Your C/C++ application
+        with malloc/free calls
+    end note
+}
+
+package "Interception Layer" {
+    interface "Memory API" as MemAPI
+    [malloc_wrapper] as MallocW
+    [free_wrapper] as FreeW
+    [realloc_wrapper] as ReallocW
+    [calloc_wrapper] as CallocW
+    
+    note right of MemAPI
+        Standard POSIX
+        memory functions
+    end note
+}
+
+package "Core Tracking Engine" {
+    [Allocation Tracker] as Tracker
+    [Hash Table Manager] as HashMgr
+    [Thread Safety Layer] as ThreadSafe
+    database "Allocation Records" as AllocDB
+    
+    note right of Tracker
+        Central coordination
+        for all tracking ops
+    end note
+}
+
+package "Stack Trace Module" {
+    [Backtrace Capture] as BTrace
+    [Symbol Resolver] as SymResolver
+    [Frame Filter] as FrameFilter
+}
+
+package "Analysis Engine" {
+    [Leak Detector] as LeakDet
+    [Statistics Calculator] as Stats
+    [Memory Profiler] as Profiler
+    [Pattern Analyzer] as Pattern
+}
+
+package "Reporting System" {
+    [Report Generator] as ReportGen
+    [CLI Tool] as CLI
+    [Export Manager] as Export
+    interface "Output Formats" as Formats
+    
+    Formats -- [Text Formatter]
+    Formats -- [JSON Formatter]
+    Formats -- [CSV Formatter]
+}
+
+package "Configuration System" {
+    [Environment Parser] as EnvParser
+    [Config Manager] as ConfigMgr
+    database "Runtime Config" as ConfigDB
+}
+
+package "System Interface" {
+    [System Allocator] as SysAlloc
+    [Signal Handlers] as Signals
+    [Exit Hooks] as ExitHooks
+}
+
+' Connections
+App --> MemAPI : "calls memory functions"
+MemAPI --> MallocW
+MemAPI --> FreeW
+MemAPI --> ReallocW
+MemAPI --> CallocW
+
+MallocW --> Tracker : "record allocation"
+FreeW --> Tracker : "record deallocation"
+ReallocW --> Tracker : "update allocation"
+CallocW --> Tracker : "record allocation"
+
+Tracker --> ThreadSafe : "acquire lock"
+Tracker --> HashMgr : "store/retrieve"
+HashMgr --> AllocDB : "persist data"
+
+Tracker --> BTrace : "capture stack"
+BTrace --> SymResolver : "resolve symbols"
+BTrace --> FrameFilter : "filter frames"
+
+Tracker --> SysAlloc : "actual allocation"
+
+ExitHooks --> LeakDet : "trigger analysis"
+LeakDet --> AllocDB : "scan unfreed"
+LeakDet --> Stats : "calculate metrics"
+Stats --> Profiler : "profile data"
+
+ReportGen --> LeakDet : "get leak data"
+ReportGen --> Stats : "get statistics"
+ReportGen --> Formats : "format output"
+
+CLI --> ReportGen : "request report"
+Export --> Formats : "export data"
+
+EnvParser --> ConfigMgr : "parse vars"
+ConfigMgr --> ConfigDB : "store config"
+Tracker --> ConfigMgr : "read config"
+
+Signals --> ExitHooks : "handle termination"
+
+@enduml
+
