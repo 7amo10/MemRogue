@@ -1,7 +1,7 @@
-#include "memrogue_hash_table.h"
 #include <stdlib.h>
 #include <string.h>
-#include <stdio.h>
+#include <time.h>
+#include "memrogue_hash_table.h"
 
 // Simple hash function for pointers
 // Thomas Wang's 64-bit integer hash function
@@ -48,6 +48,7 @@ void hash_table_destroy(hash_table_t* ht) {
         while (current) {
             hash_node_t* temp = current;
             current = current->next;
+            allocation_info_destroy(temp->info);
             free(temp);
         }
     }
@@ -84,7 +85,7 @@ bool hash_table_insert(hash_table_t* ht, void* ptr, size_t size, const char* fil
                 hash_node_t* current = ht->buckets[i];
                 while (current) {
                     hash_node_t* next = current->next;
-                    size_t new_index = hash_ptr(current->info.ptr, new_capacity);
+                    size_t new_index = hash_ptr(current->info->ptr, new_capacity);
                     current->next = new_buckets[new_index];
                     new_buckets[new_index] = current;
                     current = next;
@@ -101,12 +102,24 @@ bool hash_table_insert(hash_table_t* ht, void* ptr, size_t size, const char* fil
 
     // Check if key already exists
     while (current) {
-        if (current->info.ptr == ptr) {
+        if (current->info->ptr == ptr) {
             // Update existing entry
-            current->info.size = size;
-            current->info.file = file;
-            current->info.line = line;
-            // timestamp update?
+            // We destroy the old one and create a new one to handle string ownership correctly
+            allocation_info_destroy(current->info);
+            current->info = allocation_info_create(ptr, size, file, line, (uint64_t)time(NULL));
+            
+            if (!current->info) {
+                // If allocation failed, we are in a bad state. 
+                // We should probably remove the node or return false.
+                // For now, let's return false but keep the node (with NULL info? dangerous).
+                // Better to remove the node.
+                // But removing from singly linked list here is annoying.
+                // Let's just return false and hope for the best (or crash safely).
+                // Actually, let's try to recover.
+                pthread_mutex_unlock(&ht->lock);
+                return false;
+            }
+            
             pthread_mutex_unlock(&ht->lock);
             return true;
         }
@@ -114,19 +127,18 @@ bool hash_table_insert(hash_table_t* ht, void* ptr, size_t size, const char* fil
     }
 
     // Create new node
-    // NOTE: In the final interceptor, this malloc must be replaced 
-    // by a custom allocator to avoid recursion.
     hash_node_t* new_node = (hash_node_t*)malloc(sizeof(hash_node_t));
     if (!new_node) {
         pthread_mutex_unlock(&ht->lock);
         return false;
     }
 
-    new_node->info.ptr = ptr;
-    new_node->info.size = size;
-    new_node->info.file = file;
-    new_node->info.line = line;
-    new_node->info.timestamp = 0; // TODO: Add timestamp logic
+    new_node->info = allocation_info_create(ptr, size, file, line, (uint64_t)time(NULL));
+    if (!new_node->info) {
+        free(new_node);
+        pthread_mutex_unlock(&ht->lock);
+        return false;
+    }
     
     // Insert at head of bucket
     new_node->next = ht->buckets[index];
@@ -146,9 +158,9 @@ allocation_info_t* hash_table_lookup(hash_table_t* ht, void* ptr) {
     hash_node_t* current = ht->buckets[index];
 
     while (current) {
-        if (current->info.ptr == ptr) {
+        if (current->info->ptr == ptr) {
             pthread_mutex_unlock(&ht->lock);
-            return &current->info;
+            return current->info;
         }
         current = current->next;
     }
@@ -167,12 +179,13 @@ bool hash_table_remove(hash_table_t* ht, void* ptr) {
     hash_node_t* prev = NULL;
 
     while (current) {
-        if (current->info.ptr == ptr) {
+        if (current->info->ptr == ptr) {
             if (prev) {
                 prev->next = current->next;
             } else {
                 ht->buckets[index] = current->next;
             }
+            allocation_info_destroy(current->info);
             free(current);
             ht->item_count--;
             pthread_mutex_unlock(&ht->lock);

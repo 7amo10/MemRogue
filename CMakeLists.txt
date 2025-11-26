@@ -27,6 +27,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # Core library (data structures, utilities)
 set(MEMROGUE_CORE_SOURCES
     src/memrogue_hash_table.c
+    src/memrogue_allocation_record.c
 )
 
 add_library(memrogue_core ${MEMROGUE_CORE_SOURCES})

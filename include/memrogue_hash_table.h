@@ -5,20 +5,11 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <stdbool.h>
-
-// Structure to hold allocation information
-typedef struct {
-    void* ptr;              // Address of the allocation (Key)
-    size_t size;            // Size of the allocation
-    const char* file;       // Source file name
-    int line;               // Line number
-    uint64_t timestamp;     // Allocation timestamp (or sequence number)
-    // Stack trace info will be added in later sprints
-} allocation_info_t;
+#include "memrogue_allocation_record.h"
 
 // Hash table node for chaining
 typedef struct hash_node {
-    allocation_info_t info;
+    allocation_info_t* info;
     struct hash_node* next;
 } hash_node_t;
 
