@@ -18,6 +18,14 @@ endif()
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(MEMROGUE_BUILD_TESTS "Build tests" ON)
 option(MEMROGUE_BUILD_EXAMPLES "Build examples" ON)
+option(MEMROGUE_ENABLE_COVERAGE "Enable code coverage reporting" OFF)
+
+# Code Coverage Configuration
+if(MEMROGUE_ENABLE_COVERAGE AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    message(STATUS "Code coverage enabled")
+    add_compile_options(--coverage -fprofile-arcs -ftest-coverage)
+    add_link_options(--coverage)
+endif()
 
 # Output Directories
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -54,6 +62,25 @@ endif()
 # Examples
 if(MEMROGUE_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+# Coverage Report Target
+if(MEMROGUE_ENABLE_COVERAGE)
+    find_program(LCOV lcov)
+    find_program(GENHTML genhtml)
+    
+    if(LCOV AND GENHTML)
+        add_custom_target(coverage
+            COMMAND ${LCOV} --capture --directory . --output-file coverage.info --ignore-errors mismatch
+            COMMAND ${LCOV} --remove coverage.info '/usr/*' --output-file coverage.info
+            COMMAND ${GENHTML} coverage.info --output-directory coverage_report
+            COMMAND ${CMAKE_COMMAND} -E echo "Coverage report generated in coverage_report/index.html"
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Generating code coverage report..."
+        )
+    else()
+        message(WARNING "lcov/genhtml not found. Coverage reports will not be available.")
+    endif()
 endif()
 
 # Installation
