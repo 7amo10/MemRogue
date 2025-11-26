@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 // ============================================================================
 // Configuration Defaults
@@ -244,6 +245,83 @@ uint64_t tracker_active_bytes(memory_tracker_t* tracker) {
     pthread_mutex_unlock(&tracker->stats_lock);
     
     return bytes;
+}
+
+double tracker_average_allocation_size(memory_tracker_t* tracker) {
+    if (!tracker || !tracker->initialized) {
+        return 0.0;
+    }
+    
+    pthread_mutex_lock(&tracker->stats_lock);
+    uint64_t total_allocs = tracker->stats.total_allocations;
+    uint64_t total_bytes = tracker->stats.total_bytes_allocated;
+    pthread_mutex_unlock(&tracker->stats_lock);
+    
+    if (total_allocs == 0) {
+        return 0.0;
+    }
+    
+    return (double)total_bytes / (double)total_allocs;
+}
+
+char* tracker_format_stats(memory_tracker_t* tracker) {
+    if (!tracker || !tracker->initialized) {
+        return NULL;
+    }
+    
+    // Get a snapshot of stats
+    tracker_stats_t stats;
+    tracker_get_stats(tracker, &stats);
+    
+    // Calculate average from the snapshot to ensure consistency
+    double avg_size = (stats.total_allocations == 0) ? 0.0 
+        : (double)stats.total_bytes_allocated / (double)stats.total_allocations;
+    
+    // Calculate required buffer size and allocate
+    // Using a generous buffer size to accommodate all statistics
+    const size_t buffer_size = 1024;
+    char* buffer = (char*)malloc(buffer_size);
+    if (!buffer) {
+        return NULL;
+    }
+    
+    int written = snprintf(buffer, buffer_size,
+        "=== Memory Tracker Statistics ===\n"
+        "Allocations:\n"
+        "  Total:    %" PRIu64 "\n"
+        "  Active:   %" PRIu64 "\n"
+        "  Peak:     %" PRIu64 "\n"
+        "Deallocations:\n"
+        "  Total:    %" PRIu64 "\n"
+        "Memory:\n"
+        "  Total allocated: %" PRIu64 " bytes\n"
+        "  Total freed:     %" PRIu64 " bytes\n"
+        "  Active:          %" PRIu64 " bytes\n"
+        "  Peak:            %" PRIu64 " bytes\n"
+        "  Average size:    %.2f bytes\n"
+        "Errors:\n"
+        "  Failed allocs:   %" PRIu64 "\n"
+        "  Unknown frees:   %" PRIu64 "\n"
+        "=================================",
+        stats.total_allocations,
+        stats.active_allocations,
+        stats.peak_allocations,
+        stats.total_deallocations,
+        stats.total_bytes_allocated,
+        stats.total_bytes_freed,
+        stats.active_bytes,
+        stats.peak_bytes,
+        avg_size,
+        stats.failed_allocations,
+        stats.unknown_frees);
+    
+    if (written < 0 || (size_t)written >= buffer_size) {
+        // snprintf failed or truncated
+        free(buffer);
+        return NULL;
+    }
+    
+    return buffer;
 }
 
 // ============================================================================
