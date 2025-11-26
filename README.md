@@ -29,6 +29,17 @@ cmake ..
 make
 ```
 
+## Using the Interception Layer
+
+MemRogue ships with an LD_PRELOAD‑friendly shared library and an example program. After building:
+
+```bash
+cd build
+LD_PRELOAD=$(pwd)/lib/libmemrogue.so ./bin/memrogue_example
+```
+
+The example performs a few allocations and deallocations, while MemRogue prints a short summary at process exit including any outstanding allocations.
+
 ## License
 
 MIT License
