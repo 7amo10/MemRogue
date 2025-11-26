@@ -15,6 +15,11 @@ target_link_libraries(test_backtrace PRIVATE memrogue_core)
 target_compile_options(test_backtrace PRIVATE -rdynamic)  # Enable symbol names in backtrace
 add_test(NAME BacktraceTest COMMAND test_backtrace)
 
+add_executable(test_tracker test_tracker.c)
+target_link_libraries(test_tracker PRIVATE memrogue_core)
+target_compile_options(test_tracker PRIVATE -rdynamic)  # Enable symbol names in backtrace
+add_test(NAME TrackerTest COMMAND test_tracker)
+
 # Integration test for interception layer
 add_test(NAME InterceptionTest 
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_interception.sh

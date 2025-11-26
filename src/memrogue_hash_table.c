@@ -287,3 +287,27 @@ bool hash_table_insert_with_backtrace(hash_table_t* ht, void* ptr, size_t size,
     pthread_mutex_unlock(&ht->lock);
     return true;
 }
+
+void hash_table_iterate(hash_table_t* ht, hash_table_iterate_fn callback, void* user_data) {
+    if (!ht || !callback) {
+        return;
+    }
+    
+    pthread_mutex_lock(&ht->lock);
+    
+    for (size_t i = 0; i < ht->bucket_count; i++) {
+        hash_node_t* node = ht->buckets[i];
+        while (node) {
+            if (node->info) {
+                if (!callback(node->info, user_data)) {
+                    // User requested stop
+                    pthread_mutex_unlock(&ht->lock);
+                    return;
+                }
+            }
+            node = node->next;
+        }
+    }
+    
+    pthread_mutex_unlock(&ht->lock);
+}
