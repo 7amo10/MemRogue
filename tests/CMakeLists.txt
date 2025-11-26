@@ -1,3 +1,7 @@
 add_executable(test_hash_table test_hash_table.c)
 target_link_libraries(test_hash_table PRIVATE memrogue_core)
 add_test(NAME HashTableTest COMMAND test_hash_table)
+
+add_executable(test_multithreaded test_multithreaded.c)
+target_link_libraries(test_multithreaded PRIVATE memrogue_core pthread)
+add_test(NAME MultithreadedTest COMMAND test_multithreaded)

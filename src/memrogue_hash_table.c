@@ -57,6 +57,18 @@ void hash_table_destroy(hash_table_t* ht) {
     free(ht);
 }
 
+void hash_table_lock_acquire(hash_table_t* ht) {
+    if (ht) {
+        pthread_mutex_lock(&ht->lock);
+    }
+}
+
+void hash_table_lock_release(hash_table_t* ht) {
+    if (ht) {
+        pthread_mutex_unlock(&ht->lock);
+    }
+}
+
 bool hash_table_insert(hash_table_t* ht, void* ptr, size_t size, const char* file, int line) {
     if (!ht || !ptr) return false;
 

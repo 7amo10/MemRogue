@@ -40,4 +40,8 @@ bool hash_table_remove(hash_table_t* ht, void* ptr);
 
 size_t hash_table_count(hash_table_t* ht);
 
+// Thread safety helpers
+void hash_table_lock_acquire(hash_table_t* ht);
+void hash_table_lock_release(hash_table_t* ht);
+
 #endif // MEMROGUE_HASH_TABLE_H
