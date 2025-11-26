@@ -5,3 +5,13 @@ add_test(NAME HashTableTest COMMAND test_hash_table)
 add_executable(test_multithreaded test_multithreaded.c)
 target_link_libraries(test_multithreaded PRIVATE memrogue_core pthread)
 add_test(NAME MultithreadedTest COMMAND test_multithreaded)
+
+add_executable(test_allocation_record test_allocation_record.c)
+target_link_libraries(test_allocation_record PRIVATE memrogue_core)
+add_test(NAME AllocationRecordTest COMMAND test_allocation_record)
+
+# Integration test for interception layer
+add_test(NAME InterceptionTest 
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_interception.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
