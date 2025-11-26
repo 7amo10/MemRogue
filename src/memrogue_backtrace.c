@@ -310,3 +310,168 @@ int resolved_frame_format(const resolved_frame_t* frame, char* buffer, size_t bu
     // snprintf returns the number that would have been written if buffer was large enough
     return (written < (int)buffer_size) ? written : (int)buffer_size - 1;
 }
+
+// ============================================================================
+// Frame Filtering Implementation
+// ============================================================================
+
+// Global default filter with standard patterns
+static frame_filter_t g_default_filter = {
+    .patterns = {
+        "memrogue_",      // Our debugger functions
+        "backtrace",      // backtrace capture functions
+        "__libc_",        // libc internal functions
+        NULL
+    },
+    .pattern_count = 3,
+    .skip_count = MEMROGUE_DEFAULT_SKIP_FRAMES
+};
+
+void frame_filter_init(frame_filter_t* filter) {
+    if (!filter) {
+        return;
+    }
+    
+    // Copy default patterns
+    filter->pattern_count = 0;
+    filter->skip_count = MEMROGUE_DEFAULT_SKIP_FRAMES;
+    
+    // Add default patterns
+    frame_filter_add_pattern(filter, "memrogue_");
+    frame_filter_add_pattern(filter, "backtrace");
+    frame_filter_add_pattern(filter, "__libc_");
+}
+
+void frame_filter_init_simple(frame_filter_t* filter, int skip_count) {
+    if (!filter) {
+        return;
+    }
+    
+    filter->pattern_count = 0;
+    filter->skip_count = skip_count;
+    
+    // Clear all patterns
+    for (int i = 0; i < MEMROGUE_MAX_FILTER_PATTERNS; i++) {
+        filter->patterns[i] = NULL;
+    }
+}
+
+int frame_filter_add_pattern(frame_filter_t* filter, const char* pattern) {
+    if (!filter || !pattern) {
+        return 0;
+    }
+    
+    if (filter->pattern_count >= MEMROGUE_MAX_FILTER_PATTERNS) {
+        return 0;  // Filter is full
+    }
+    
+    filter->patterns[filter->pattern_count] = pattern;
+    filter->pattern_count++;
+    return 1;
+}
+
+void frame_filter_clear(frame_filter_t* filter) {
+    if (!filter) {
+        return;
+    }
+    
+    filter->pattern_count = 0;
+    for (int i = 0; i < MEMROGUE_MAX_FILTER_PATTERNS; i++) {
+        filter->patterns[i] = NULL;
+    }
+}
+
+int frame_filter_should_skip(const frame_filter_t* filter, const char* function_name) {
+    if (!filter || !function_name) {
+        return 0;  // Don't skip if no filter or no function name
+    }
+    
+    // Check each pattern
+    for (int i = 0; i < filter->pattern_count; i++) {
+        const char* pattern = filter->patterns[i];
+        if (pattern && strncmp(function_name, pattern, strlen(pattern)) == 0) {
+            return 1;  // Match found, should skip
+        }
+    }
+    
+    return 0;  // No match, keep this frame
+}
+
+const frame_filter_t* frame_filter_get_default(void) {
+    return &g_default_filter;
+}
+
+void frame_filter_set_default_skip(int skip_count) {
+    if (skip_count >= 0) {
+        g_default_filter.skip_count = skip_count;
+    }
+}
+
+int backtrace_capture_filtered(allocation_info_t* info, const frame_filter_t* filter) {
+    if (!info) {
+        return 0;
+    }
+    
+    // Initialize to empty state
+    info->frame_count = 0;
+    memset(info->frames, 0, sizeof(info->frames));
+
+#if HAVE_BACKTRACE
+    // Determine skip count
+    int skip_frames = filter ? filter->skip_count : MEMROGUE_DEFAULT_SKIP_FRAMES;
+    
+    // Capture more frames than we need to allow for filtering
+    void* temp_buffer[MEMROGUE_MAX_FRAMES * 2];
+    int max_capture = (int)(sizeof(temp_buffer) / sizeof(temp_buffer[0]));
+    
+    int total_frames = backtrace(temp_buffer, max_capture);
+    if (total_frames <= 0) {
+        return 0;
+    }
+    
+    // Skip the first N frames (internal frames)
+    int start_index = skip_frames;
+    if (start_index >= total_frames) {
+        return 0;
+    }
+    
+    // If no filter patterns, just copy frames after skip
+    if (!filter || filter->pattern_count == 0) {
+        int frames_to_copy = total_frames - start_index;
+        if (frames_to_copy > MEMROGUE_MAX_FRAMES) {
+            frames_to_copy = MEMROGUE_MAX_FRAMES;
+        }
+        
+        for (int i = 0; i < frames_to_copy; i++) {
+            info->frames[i] = temp_buffer[start_index + i];
+        }
+        info->frame_count = frames_to_copy;
+        return frames_to_copy;
+    }
+    
+    // Apply pattern-based filtering
+    int output_index = 0;
+    
+    for (int i = start_index; i < total_frames && output_index < MEMROGUE_MAX_FRAMES; i++) {
+        // Resolve this frame to check function name
+        resolved_frame_t frame;
+        if (symbol_resolve_frame(temp_buffer[i], &frame)) {
+            // Check if this frame should be filtered
+            if (frame.function_name && frame_filter_should_skip(filter, frame.function_name)) {
+                continue;  // Skip this frame
+            }
+        }
+        
+        // Keep this frame
+        info->frames[output_index] = temp_buffer[i];
+        output_index++;
+    }
+    
+    info->frame_count = output_index;
+    return output_index;
+    
+#else
+    (void)filter;
+    return 0;
+#endif
+}

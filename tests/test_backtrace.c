@@ -371,6 +371,178 @@ void test_symbol_contains_expected_functions() {
     allocation_info_destroy(info);
 }
 
+// ============================================================================
+// Frame Filtering Tests
+// ============================================================================
+
+void test_frame_filter_init() {
+    frame_filter_t filter;
+    frame_filter_init(&filter);
+    
+    assert(filter.pattern_count == 3);
+    assert(filter.skip_count == MEMROGUE_DEFAULT_SKIP_FRAMES);
+    assert(strcmp(filter.patterns[0], "memrogue_") == 0);
+    assert(strcmp(filter.patterns[1], "backtrace") == 0);
+    assert(strcmp(filter.patterns[2], "__libc_") == 0);
+}
+
+void test_frame_filter_init_simple() {
+    frame_filter_t filter;
+    frame_filter_init_simple(&filter, 5);
+    
+    assert(filter.pattern_count == 0);
+    assert(filter.skip_count == 5);
+}
+
+void test_frame_filter_add_pattern() {
+    frame_filter_t filter;
+    frame_filter_init_simple(&filter, 0);
+    
+    int result = frame_filter_add_pattern(&filter, "test_");
+    assert(result == 1);
+    assert(filter.pattern_count == 1);
+    assert(strcmp(filter.patterns[0], "test_") == 0);
+    
+    result = frame_filter_add_pattern(&filter, "foo_");
+    assert(result == 1);
+    assert(filter.pattern_count == 2);
+    
+    // Test NULL handling
+    result = frame_filter_add_pattern(NULL, "bar_");
+    assert(result == 0);
+    
+    result = frame_filter_add_pattern(&filter, NULL);
+    assert(result == 0);
+}
+
+void test_frame_filter_should_skip() {
+    frame_filter_t filter;
+    frame_filter_init_simple(&filter, 0);
+    frame_filter_add_pattern(&filter, "memrogue_");
+    frame_filter_add_pattern(&filter, "__libc_");
+    
+    // Should skip memrogue functions
+    assert(frame_filter_should_skip(&filter, "memrogue_track_alloc") == 1);
+    assert(frame_filter_should_skip(&filter, "memrogue_init") == 1);
+    
+    // Should skip libc internal functions
+    assert(frame_filter_should_skip(&filter, "__libc_malloc") == 1);
+    
+    // Should NOT skip user functions
+    assert(frame_filter_should_skip(&filter, "main") == 0);
+    assert(frame_filter_should_skip(&filter, "my_function") == 0);
+    assert(frame_filter_should_skip(&filter, "test_something") == 0);
+    
+    // NULL handling
+    assert(frame_filter_should_skip(NULL, "test") == 0);
+    assert(frame_filter_should_skip(&filter, NULL) == 0);
+}
+
+void test_frame_filter_clear() {
+    frame_filter_t filter;
+    frame_filter_init(&filter);
+    
+    assert(filter.pattern_count == 3);
+    
+    frame_filter_clear(&filter);
+    
+    assert(filter.pattern_count == 0);
+    
+    // NULL handling - should not crash
+    frame_filter_clear(NULL);
+}
+
+void test_frame_filter_get_default() {
+    const frame_filter_t* filter = frame_filter_get_default();
+    
+    assert(filter != NULL);
+    assert(filter->pattern_count > 0);
+    assert(filter->skip_count >= 0);
+}
+
+void test_backtrace_capture_filtered_null() {
+    // NULL info should return 0
+    int result = backtrace_capture_filtered(NULL, NULL);
+    assert(result == 0);
+}
+
+void test_backtrace_capture_filtered_basic() {
+    allocation_info_t* info = allocation_info_create((void*)0x7000, 100, "test.c", 7, 0);
+    assert(info != NULL);
+    
+    frame_filter_t filter;
+    frame_filter_init_simple(&filter, 1);  // Skip just 1 frame
+    
+    if (backtrace_available()) {
+        int count = backtrace_capture_filtered(info, &filter);
+        printf("  Captured %d frames with filter\n", count);
+        assert(count >= 0);
+    }
+    
+    allocation_info_destroy(info);
+}
+
+void test_backtrace_capture_filtered_no_filter() {
+    allocation_info_t* info = allocation_info_create((void*)0x8000, 100, "test.c", 8, 0);
+    assert(info != NULL);
+    
+    if (backtrace_available()) {
+        // NULL filter should still work (uses default skip)
+        int count = backtrace_capture_filtered(info, NULL);
+        printf("  Captured %d frames with NULL filter\n", count);
+        assert(count >= 0);
+    }
+    
+    allocation_info_destroy(info);
+}
+
+// Helper function with recognizable name for filtering test
+// Note: This function is intentionally named to test the filter but we test
+// the filter matching separately; keeping for potential future use
+__attribute__((noinline, unused))
+static void memrogue_test_internal_function(allocation_info_t* info) {
+    // This function name starts with "memrogue_" so should be filtered
+    backtrace_capture(info, 0);
+}
+
+// Helper function with user-like name
+__attribute__((noinline))
+static void user_allocation_function(allocation_info_t* info, const frame_filter_t* filter) {
+    backtrace_capture_filtered(info, filter);
+}
+
+void test_backtrace_filtered_removes_internal() {
+    allocation_info_t* info = allocation_info_create((void*)0x9000, 100, "test.c", 9, 0);
+    assert(info != NULL);
+    
+    if (backtrace_available()) {
+        // Setup filter to skip memrogue_ and backtrace functions
+        frame_filter_t filter;
+        frame_filter_init(&filter);
+        filter.skip_count = 0;  // Don't skip by count, only by pattern
+        
+        // Capture with filtering
+        user_allocation_function(info, &filter);
+        
+        if (info->frame_count > 0) {
+            // Resolve the first frame and check it's not a filtered function
+            resolved_frame_t frame;
+            if (symbol_resolve_frame(info->frames[0], &frame)) {
+                printf("  First frame after filter: %s\n", 
+                       frame.function_name ? frame.function_name : "(unknown)");
+                
+                // The first frame should NOT start with filtered prefixes
+                if (frame.function_name) {
+                    assert(strncmp(frame.function_name, "memrogue_", 9) != 0);
+                    assert(strncmp(frame.function_name, "__libc_", 7) != 0);
+                }
+            }
+        }
+    }
+    
+    allocation_info_destroy(info);
+}
+
 int main() {
     printf("=== Backtrace Unit Tests ===\n\n");
     
@@ -394,6 +566,19 @@ int main() {
     TEST(test_symbol_resolve_frame_fallback);
     TEST(test_resolved_backtrace_destroy_null);
     TEST(test_symbol_contains_expected_functions);
+    
+    printf("\n=== Frame Filtering Tests ===\n\n");
+    
+    TEST(test_frame_filter_init);
+    TEST(test_frame_filter_init_simple);
+    TEST(test_frame_filter_add_pattern);
+    TEST(test_frame_filter_should_skip);
+    TEST(test_frame_filter_clear);
+    TEST(test_frame_filter_get_default);
+    TEST(test_backtrace_capture_filtered_null);
+    TEST(test_backtrace_capture_filtered_basic);
+    TEST(test_backtrace_capture_filtered_no_filter);
+    TEST(test_backtrace_filtered_removes_internal);
     
     printf("\n=== Results: %d/%d tests passed ===\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
