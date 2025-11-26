@@ -322,6 +322,87 @@ void test_tracker_reset_stats() {
     tracker_destroy(tracker);
 }
 
+void test_tracker_average_allocation_size() {
+    memory_tracker_t* tracker = tracker_create();
+    assert(tracker != NULL);
+    
+    // No allocations - average should be 0
+    double avg = tracker_average_allocation_size(tracker);
+    assert(avg == 0.0);
+    
+    // Make some allocations with different sizes
+    track_allocation(tracker, (void*)0x1000, 100, "test.c", 1);  // 100 bytes
+    track_allocation(tracker, (void*)0x2000, 200, "test.c", 2);  // 200 bytes
+    track_allocation(tracker, (void*)0x3000, 300, "test.c", 3);  // 300 bytes
+    
+    // Average should be (100 + 200 + 300) / 3 = 200
+    avg = tracker_average_allocation_size(tracker);
+    assert(avg == 200.0);
+    
+    // Deallocations shouldn't affect average (it's based on total allocated)
+    track_deallocation(tracker, (void*)0x1000);
+    avg = tracker_average_allocation_size(tracker);
+    assert(avg == 200.0);  // Still 200
+    
+    // New allocation changes the average
+    track_allocation(tracker, (void*)0x4000, 400, "test.c", 4);  // 400 bytes
+    // Average should be (100 + 200 + 300 + 400) / 4 = 250
+    avg = tracker_average_allocation_size(tracker);
+    assert(avg == 250.0);
+    
+    tracker_destroy(tracker);
+}
+
+void test_tracker_average_allocation_size_null() {
+    double avg = tracker_average_allocation_size(NULL);
+    assert(avg == 0.0);
+}
+
+void test_tracker_format_stats() {
+    memory_tracker_t* tracker = tracker_create();
+    assert(tracker != NULL);
+    
+    track_allocation(tracker, (void*)0x1000, 100, "test.c", 1);
+    track_allocation(tracker, (void*)0x2000, 200, "test.c", 2);
+    track_deallocation(tracker, (void*)0x1000);
+    
+    char* output = tracker_format_stats(tracker);
+    assert(output != NULL);
+    
+    // Check that the output contains expected sections
+    assert(strstr(output, "Memory Tracker Statistics") != NULL);
+    assert(strstr(output, "Allocations:") != NULL);
+    assert(strstr(output, "Deallocations:") != NULL);
+    assert(strstr(output, "Memory:") != NULL);
+    assert(strstr(output, "Average size:") != NULL);
+    assert(strstr(output, "Errors:") != NULL);
+    
+    // Check some values are present (total allocations should be 2)
+    assert(strstr(output, "Total:") != NULL);
+    
+    free(output);
+    tracker_destroy(tracker);
+}
+
+void test_tracker_format_stats_null() {
+    char* output = tracker_format_stats(NULL);
+    assert(output == NULL);
+}
+
+void test_tracker_format_stats_empty() {
+    memory_tracker_t* tracker = tracker_create();
+    assert(tracker != NULL);
+    
+    // No allocations - should still format properly
+    char* output = tracker_format_stats(tracker);
+    assert(output != NULL);
+    assert(strstr(output, "Memory Tracker Statistics") != NULL);
+    assert(strstr(output, "Average size:    0.00 bytes") != NULL);
+    
+    free(output);
+    tracker_destroy(tracker);
+}
+
 // ============================================================================
 // Iteration Tests
 // ============================================================================
@@ -507,6 +588,11 @@ int main() {
     TEST(test_tracker_stats_basic);
     TEST(test_tracker_stats_peak);
     TEST(test_tracker_reset_stats);
+    TEST(test_tracker_average_allocation_size);
+    TEST(test_tracker_average_allocation_size_null);
+    TEST(test_tracker_format_stats);
+    TEST(test_tracker_format_stats_null);
+    TEST(test_tracker_format_stats_empty);
     
     printf("\n=== Iteration Tests ===\n\n");
     

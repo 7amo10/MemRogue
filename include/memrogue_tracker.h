@@ -183,6 +183,29 @@ uint64_t tracker_active_count(memory_tracker_t* tracker);
  */
 uint64_t tracker_active_bytes(memory_tracker_t* tracker);
 
+/**
+ * Calculate the average allocation size.
+ * 
+ * Computes the average size of all allocations made since tracker creation
+ * or last reset. Returns 0 if no allocations have been made.
+ * 
+ * @param tracker The memory tracker
+ * @return Average allocation size in bytes, or 0 if no allocations
+ */
+double tracker_average_allocation_size(memory_tracker_t* tracker);
+
+/**
+ * Format statistics as a human-readable string.
+ * 
+ * Creates a formatted string containing all statistics.
+ * The caller is responsible for freeing the returned string.
+ * 
+ * @param tracker The memory tracker
+ * @return A newly allocated string with formatted stats, or NULL on failure.
+ *         The caller must free() the returned string.
+ */
+char* tracker_format_stats(memory_tracker_t* tracker);
+
 // ============================================================================
 // Iteration Functions
 // ============================================================================
