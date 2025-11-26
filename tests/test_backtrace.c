@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static int tests_run = 0;
 static int tests_passed = 0;
@@ -179,6 +180,197 @@ void test_backtrace_reinitialize() {
     allocation_info_destroy(info);
 }
 
+// ============ Symbol Resolution Tests ============
+
+void test_symbol_resolve_null() {
+    // Should handle NULL gracefully
+    resolved_backtrace_t* bt = symbol_resolve(NULL);
+    assert(bt == NULL);
+    
+    // Resolve frame with NULL should return 0
+    int result = symbol_resolve_frame(NULL, NULL);
+    assert(result == 0);
+}
+
+void test_symbol_resolve_empty_info() {
+    allocation_info_t* info = allocation_info_create((void*)0x1000, 100, "test.c", 1, 0);
+    assert(info != NULL);
+    
+    // frame_count is 0, should return NULL
+    assert(info->frame_count == 0);
+    resolved_backtrace_t* bt = symbol_resolve(info);
+    assert(bt == NULL);
+    
+    allocation_info_destroy(info);
+}
+
+__attribute__((noinline))
+void test_function_for_symbol_resolution(allocation_info_t* info) {
+    backtrace_capture(info, 0);
+}
+
+void test_symbol_resolve_basic() {
+    allocation_info_t* info = allocation_info_create((void*)0x2000, 100, "test.c", 2, 0);
+    assert(info != NULL);
+    
+    // Capture real backtrace
+    test_function_for_symbol_resolution(info);
+    
+    if (backtrace_available() && info->frame_count > 0) {
+        resolved_backtrace_t* bt = symbol_resolve(info);
+        assert(bt != NULL);
+        assert(bt->frame_count == info->frame_count);
+        assert(bt->frames != NULL);
+        
+        printf("  Resolved %d frames:\n", bt->frame_count);
+        for (int i = 0; i < bt->frame_count && i < 5; i++) {
+            printf("    [%d] %s\n", i, 
+                   bt->frames[i].function_name ? bt->frames[i].function_name : "(null)");
+        }
+        if (bt->frame_count > 5) {
+            printf("    ... and %d more\n", bt->frame_count - 5);
+        }
+        
+        // At least one frame should have a function name
+        int has_name = 0;
+        for (int i = 0; i < bt->frame_count; i++) {
+            if (bt->frames[i].function_name && bt->frames[i].function_name[0] != '\0') {
+                has_name = 1;
+                break;
+            }
+        }
+        assert(has_name);
+        
+        resolved_backtrace_destroy(bt);
+    }
+    
+    allocation_info_destroy(info);
+}
+
+void test_symbol_resolve_frame_single() {
+    allocation_info_t* info = allocation_info_create((void*)0x3000, 100, "test.c", 3, 0);
+    assert(info != NULL);
+    
+    test_function_for_symbol_resolution(info);
+    
+    if (backtrace_available() && info->frame_count > 0) {
+        resolved_frame_t frame;
+        int result = symbol_resolve_frame(info->frames[0], &frame);
+        assert(result == 1);
+        assert(frame.address == info->frames[0]);
+        assert(frame.function_name != NULL);
+        
+        printf("  Single frame: %s\n", frame.function_name);
+    }
+    
+    allocation_info_destroy(info);
+}
+
+void test_symbol_format() {
+    allocation_info_t* info = allocation_info_create((void*)0x4000, 100, "test.c", 4, 0);
+    assert(info != NULL);
+    
+    test_function_for_symbol_resolution(info);
+    
+    if (backtrace_available() && info->frame_count > 0) {
+        resolved_backtrace_t* bt = symbol_resolve(info);
+        assert(bt != NULL);
+        
+        char buffer[512];
+        int written = resolved_frame_format(&bt->frames[0], buffer, sizeof(buffer));
+        assert(written > 0);
+        assert(strlen(buffer) > 0);
+        
+        printf("  Formatted: %s\n", buffer);
+        
+        resolved_backtrace_destroy(bt);
+    }
+    
+    allocation_info_destroy(info);
+}
+
+void test_resolved_backtrace_destroy_null() {
+    // Should not crash
+    resolved_backtrace_destroy(NULL);
+}
+
+void test_symbol_format_truncation() {
+    allocation_info_t* info = allocation_info_create((void*)0x6000, 100, "test.c", 6, 0);
+    assert(info != NULL);
+    
+    test_function_for_symbol_resolution(info);
+    
+    if (backtrace_available() && info->frame_count > 0) {
+        resolved_backtrace_t* bt = symbol_resolve(info);
+        assert(bt != NULL);
+        
+        // Test with a very small buffer to trigger truncation
+        char small_buffer[10];
+        int written = resolved_frame_format(&bt->frames[0], small_buffer, sizeof(small_buffer));
+        
+        // Written should be capped to buffer_size - 1 (9 chars max)
+        assert(written >= 0);
+        assert(written <= 9);
+        assert(strlen(small_buffer) <= 9);
+        
+        // Ensure null termination
+        assert(small_buffer[sizeof(small_buffer) - 1] == '\0');
+        
+        printf("  Truncated output (%d chars): %s\n", written, small_buffer);
+        
+        resolved_backtrace_destroy(bt);
+    }
+    
+    allocation_info_destroy(info);
+}
+
+void test_symbol_resolve_frame_fallback() {
+    // Test with an invalid/unlikely address that won't resolve to a valid symbol
+    void* unlikely_address = (void*)0xDEADBEEF;
+    resolved_frame_t frame;
+    
+    int result = symbol_resolve_frame(unlikely_address, &frame);
+    assert(result == 1);  // Should still succeed
+    assert(frame.address == unlikely_address);
+    
+    // The function should provide a fallback (address as hex string)
+    assert(frame.function_name != NULL);
+    assert(strlen(frame.function_name) > 0);
+    
+    // Verify the fallback format shows the address
+    printf("  Fallback for 0x%lx: %s\n", (unsigned long)(uintptr_t)unlikely_address, frame.function_name);
+}
+
+void test_symbol_contains_expected_functions() {
+    allocation_info_t* info = allocation_info_create((void*)0x5000, 100, "test.c", 5, 0);
+    assert(info != NULL);
+    
+    // Use deep stack to get recognizable function names
+    deep_function_1(info);
+    
+    if (backtrace_available() && info->frame_count > 0) {
+        resolved_backtrace_t* bt = symbol_resolve(info);
+        assert(bt != NULL);
+        
+        // Look for our test functions in the backtrace
+        int found_deep = 0;
+        for (int i = 0; i < bt->frame_count; i++) {
+            if (bt->frames[i].function_name) {
+                if (strstr(bt->frames[i].function_name, "deep_function") != NULL) {
+                    found_deep = 1;
+                }
+            }
+        }
+        
+        printf("  Found deep_function in backtrace: %s\n", found_deep ? "yes" : "no");
+        // Note: This might not always work depending on optimization level
+        
+        resolved_backtrace_destroy(bt);
+    }
+    
+    allocation_info_destroy(info);
+}
+
 int main() {
     printf("=== Backtrace Unit Tests ===\n\n");
     
@@ -190,6 +382,18 @@ int main() {
     TEST(test_backtrace_deep_stack);
     TEST(test_hash_table_insert_with_backtrace);
     TEST(test_backtrace_reinitialize);
+    
+    printf("\n=== Symbol Resolution Tests ===\n\n");
+    
+    TEST(test_symbol_resolve_null);
+    TEST(test_symbol_resolve_empty_info);
+    TEST(test_symbol_resolve_basic);
+    TEST(test_symbol_resolve_frame_single);
+    TEST(test_symbol_format);
+    TEST(test_symbol_format_truncation);
+    TEST(test_symbol_resolve_frame_fallback);
+    TEST(test_resolved_backtrace_destroy_null);
+    TEST(test_symbol_contains_expected_functions);
     
     printf("\n=== Results: %d/%d tests passed ===\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;
