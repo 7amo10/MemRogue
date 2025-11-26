@@ -24,22 +24,25 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# Include Directories
-include_directories(include)
+# Core library (data structures, utilities)
+set(MEMROGUE_CORE_SOURCES
+    src/memrogue_hash_table.c
+)
 
-# Source Files
-file(GLOB_RECURSE SOURCES "src/*.c" "src/*.cpp")
-
-# Library Target
-add_library(memrogue ${SOURCES})
-target_include_directories(memrogue PUBLIC 
+add_library(memrogue_core ${MEMROGUE_CORE_SOURCES})
+target_include_directories(memrogue_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(memrogue PRIVATE pthread)
+target_link_libraries(memrogue_core PUBLIC pthread)
 
-# Alias for easier usage
-add_library(MemRogue::memrogue ALIAS memrogue)
+# Interception layer is a shared object meant to be LD_PRELOAD'ed
+add_library(memrogue_intercept SHARED src/memrogue_intercept.c)
+target_include_directories(memrogue_intercept PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(memrogue_intercept PRIVATE memrogue_core dl pthread)
+
+add_library(MemRogue::core ALIAS memrogue_core)
+add_library(MemRogue::intercept ALIAS memrogue_intercept)
 
 # Tests
 if(MEMROGUE_BUILD_TESTS)
@@ -54,7 +57,7 @@ endif()
 
 # Installation
 include(GNUInstallDirs)
-install(TARGETS memrogue
+install(TARGETS memrogue_core memrogue_intercept
     EXPORT MemRogueTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
