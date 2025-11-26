@@ -10,6 +10,10 @@ allocation_info_t* allocation_info_create(void* ptr, size_t size, const char* fi
     info->size = size;
     info->line = line;
     info->timestamp = timestamp;
+    
+    // Initialize stack trace fields
+    info->frame_count = 0;
+    memset(info->frames, 0, sizeof(info->frames));
 
     if (file) {
         info->file = strdup(file);

@@ -4,6 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Maximum number of stack frames to capture per allocation
+#define MEMROGUE_MAX_FRAMES 16
+
 // Structure to hold allocation information
 typedef struct {
     void* ptr;              // Address of the allocation (Key)
@@ -11,7 +14,10 @@ typedef struct {
     char* file;             // Source file name (owned copy)
     int line;               // Line number
     uint64_t timestamp;     // Allocation timestamp (or sequence number)
-    // Stack trace info will be added in later sprints
+    
+    // Stack trace information
+    void* frames[MEMROGUE_MAX_FRAMES];  // Array of frame addresses
+    int frame_count;                     // Number of valid frames captured
 } allocation_info_t;
 
 // Creates a new allocation record
