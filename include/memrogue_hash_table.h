@@ -31,6 +31,11 @@ bool hash_table_remove(hash_table_t* ht, void* ptr);
 
 size_t hash_table_count(hash_table_t* ht);
 
+// Extended insert with backtrace capture
+// skip_frames: number of stack frames to skip (for internal functions)
+bool hash_table_insert_with_backtrace(hash_table_t* ht, void* ptr, size_t size, 
+                                       const char* file, int line, int skip_frames);
+
 // Thread safety helpers
 void hash_table_lock_acquire(hash_table_t* ht);
 void hash_table_lock_release(hash_table_t* ht);
