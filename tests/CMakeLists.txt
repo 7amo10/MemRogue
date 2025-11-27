@@ -25,6 +25,11 @@ target_link_libraries(test_comprehensive PRIVATE memrogue_core pthread)
 target_compile_options(test_comprehensive PRIVATE -rdynamic)  # Enable symbol names in backtrace
 add_test(NAME ComprehensiveTest COMMAND test_comprehensive)
 
+add_executable(test_exit_handler test_exit_handler.c)
+target_link_libraries(test_exit_handler PRIVATE memrogue_core pthread)
+target_compile_options(test_exit_handler PRIVATE -rdynamic)  # Enable symbol names in backtrace
+add_test(NAME ExitHandlerTest COMMAND test_exit_handler)
+
 # Integration test for interception layer
 add_test(NAME InterceptionTest 
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_interception.sh
