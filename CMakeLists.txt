@@ -39,6 +39,7 @@ set(MEMROGUE_CORE_SOURCES
     src/memrogue_backtrace.c
     src/memrogue_tracker.c
     src/memrogue_exit_handler.c
+    src/memrogue_leak_detector.c
 )
 
 add_library(memrogue_core ${MEMROGUE_CORE_SOURCES})

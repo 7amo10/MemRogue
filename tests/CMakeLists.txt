@@ -30,6 +30,11 @@ target_link_libraries(test_exit_handler PRIVATE memrogue_core pthread)
 target_compile_options(test_exit_handler PRIVATE -rdynamic)  # Enable symbol names in backtrace
 add_test(NAME ExitHandlerTest COMMAND test_exit_handler)
 
+add_executable(test_leak_detector test_leak_detector.c)
+target_link_libraries(test_leak_detector PRIVATE memrogue_core pthread)
+target_compile_options(test_leak_detector PRIVATE -rdynamic)  # Enable symbol names in backtrace
+add_test(NAME LeakDetectorTest COMMAND test_leak_detector)
+
 # Integration test for interception layer
 add_test(NAME InterceptionTest 
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_interception.sh
