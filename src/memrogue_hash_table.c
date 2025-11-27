@@ -2,6 +2,7 @@
 #include <string.h>
 #include <time.h>
 #include "memrogue_hash_table.h"
+#include "memrogue_backtrace.h"
 
 // Simple hash function for pointers
 // Thomas Wang's 64-bit integer hash function
@@ -205,4 +206,108 @@ size_t hash_table_count(hash_table_t* ht) {
     size_t count = ht->item_count;
     pthread_mutex_unlock(&ht->lock);
     return count;
+}
+
+bool hash_table_insert_with_backtrace(hash_table_t* ht, void* ptr, size_t size, 
+                                       const char* file, int line, int skip_frames) {
+    if (!ht || !ptr) return false;
+
+    pthread_mutex_lock(&ht->lock);
+
+    // Resize if load factor > 0.75
+    if (ht->item_count >= (ht->bucket_count * 3) / 4) {
+        size_t new_capacity = ht->bucket_count * 2;
+        hash_node_t** new_buckets = (hash_node_t**)calloc(new_capacity, sizeof(hash_node_t*));
+        
+        if (new_buckets) {
+            for (size_t i = 0; i < ht->bucket_count; ++i) {
+                hash_node_t* current = ht->buckets[i];
+                while (current) {
+                    hash_node_t* next = current->next;
+                    size_t new_index = hash_ptr(current->info->ptr, new_capacity);
+                    current->next = new_buckets[new_index];
+                    new_buckets[new_index] = current;
+                    current = next;
+                }
+            }
+            free(ht->buckets);
+            ht->buckets = new_buckets;
+            ht->bucket_count = new_capacity;
+        }
+    }
+
+    size_t index = hash_ptr(ptr, ht->bucket_count);
+    hash_node_t* current = ht->buckets[index];
+
+    // Check if key already exists
+    while (current) {
+        if (current->info->ptr == ptr) {
+            // Update existing entry
+            allocation_info_destroy(current->info);
+            current->info = allocation_info_create(ptr, size, file, line, (uint64_t)time(NULL));
+            
+            if (!current->info) {
+                pthread_mutex_unlock(&ht->lock);
+                return false;
+            }
+            
+            // Capture backtrace for updated entry
+            // Add 1 to skip_frames to account for this function
+            backtrace_capture(current->info, skip_frames + 1);
+            
+            pthread_mutex_unlock(&ht->lock);
+            return true;
+        }
+        current = current->next;
+    }
+
+    // Create new node
+    hash_node_t* new_node = (hash_node_t*)malloc(sizeof(hash_node_t));
+    if (!new_node) {
+        pthread_mutex_unlock(&ht->lock);
+        return false;
+    }
+
+    new_node->info = allocation_info_create(ptr, size, file, line, (uint64_t)time(NULL));
+    if (!new_node->info) {
+        free(new_node);
+        pthread_mutex_unlock(&ht->lock);
+        return false;
+    }
+    
+    // Capture backtrace for new entry
+    // Add 1 to skip_frames to account for this function
+    backtrace_capture(new_node->info, skip_frames + 1);
+    
+    // Insert at head of bucket
+    new_node->next = ht->buckets[index];
+    ht->buckets[index] = new_node;
+    ht->item_count++;
+
+    pthread_mutex_unlock(&ht->lock);
+    return true;
+}
+
+void hash_table_iterate(hash_table_t* ht, hash_table_iterate_fn callback, void* user_data) {
+    if (!ht || !callback) {
+        return;
+    }
+    
+    pthread_mutex_lock(&ht->lock);
+    
+    for (size_t i = 0; i < ht->bucket_count; i++) {
+        hash_node_t* node = ht->buckets[i];
+        while (node) {
+            if (node->info) {
+                if (!callback(node->info, user_data)) {
+                    // User requested stop
+                    pthread_mutex_unlock(&ht->lock);
+                    return;
+                }
+            }
+            node = node->next;
+        }
+    }
+    
+    pthread_mutex_unlock(&ht->lock);
 }
