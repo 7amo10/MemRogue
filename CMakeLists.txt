@@ -42,6 +42,7 @@ set(MEMROGUE_CORE_SOURCES
     src/memrogue_leak_detector.c
     src/memrogue_double_free.c
     src/memrogue_invalid_free.c
+    src/memrogue_report.c
 )
 
 add_library(memrogue_core ${MEMROGUE_CORE_SOURCES})
