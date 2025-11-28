@@ -40,6 +40,11 @@ target_link_libraries(test_double_free PRIVATE memrogue_core pthread)
 target_compile_options(test_double_free PRIVATE -rdynamic)  # Enable symbol names in backtrace
 add_test(NAME DoubleFreeTest COMMAND test_double_free)
 
+add_executable(test_invalid_free test_invalid_free.c)
+target_link_libraries(test_invalid_free PRIVATE memrogue_core pthread)
+target_compile_options(test_invalid_free PRIVATE -rdynamic)  # Enable symbol names in backtrace
+add_test(NAME InvalidFreeTest COMMAND test_invalid_free)
+
 # Integration test for interception layer
 add_test(NAME InterceptionTest 
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_interception.sh
