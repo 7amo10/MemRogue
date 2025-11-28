@@ -19,8 +19,18 @@
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #include "../include/memrogue_double_free.h"
+
+/*
+ * Disable "use-after-free" warnings for this file.
+ * These tests intentionally use pointers after free() to test
+ * double-free detection functionality.
+ */
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic ignored "-Wuse-after-free"
+#endif
 
 /* ============================================================================
  * Test Infrastructure
