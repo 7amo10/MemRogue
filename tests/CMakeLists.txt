@@ -50,6 +50,10 @@ target_link_libraries(test_report PRIVATE memrogue_core pthread)
 target_compile_options(test_report PRIVATE -rdynamic)  # Enable symbol names in backtrace
 add_test(NAME ReportTest COMMAND test_report)
 
+add_executable(test_leak_structures test_leak_structures.c)
+target_link_libraries(test_leak_structures PRIVATE memrogue_core)
+add_test(NAME LeakStructuresTest COMMAND test_leak_structures)
+
 # Integration test for interception layer
 add_test(NAME InterceptionTest 
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_interception.sh
