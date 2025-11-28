@@ -38,6 +38,11 @@ set(MEMROGUE_CORE_SOURCES
     src/memrogue_allocation_record.c
     src/memrogue_backtrace.c
     src/memrogue_tracker.c
+    src/memrogue_exit_handler.c
+    src/memrogue_leak_detector.c
+    src/memrogue_double_free.c
+    src/memrogue_invalid_free.c
+    src/memrogue_report.c
 )
 
 add_library(memrogue_core ${MEMROGUE_CORE_SOURCES})

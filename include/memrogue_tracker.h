@@ -58,7 +58,7 @@ typedef struct {
  * Tracks all memory allocations with optional backtrace capture.
  * Thread-safe for concurrent use.
  */
-typedef struct {
+typedef struct memory_tracker_internal {
     hash_table_t* allocations;       // Hash table of active allocations
     tracker_stats_t stats;           // Allocation statistics
     tracker_config_t config;         // Configuration options
