@@ -43,6 +43,7 @@ set(MEMROGUE_CORE_SOURCES
     src/memrogue_double_free.c
     src/memrogue_invalid_free.c
     src/memrogue_report.c
+    src/memrogue_cli.c
 )
 
 add_library(memrogue_core ${MEMROGUE_CORE_SOURCES})
@@ -56,6 +57,10 @@ target_link_libraries(memrogue_core PUBLIC pthread)
 add_library(memrogue_intercept SHARED src/memrogue_intercept.c)
 target_include_directories(memrogue_intercept PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(memrogue_intercept PRIVATE memrogue_core dl pthread)
+
+# CLI tool - standalone binary for report generation
+add_executable(memrogue-report tools/memrogue_report.c)
+target_link_libraries(memrogue-report PRIVATE memrogue_core)
 
 add_library(MemRogue::core ALIAS memrogue_core)
 add_library(MemRogue::intercept ALIAS memrogue_intercept)
@@ -92,7 +97,7 @@ endif()
 
 # Installation
 include(GNUInstallDirs)
-install(TARGETS memrogue_core memrogue_intercept
+install(TARGETS memrogue_core memrogue_intercept memrogue-report
     EXPORT MemRogueTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
