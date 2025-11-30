@@ -10,12 +10,19 @@
  *   MEMROGUE_ENABLED      - Enable/disable tracking ("0", "1", "true", "false")
  *   MEMROGUE_OUTPUT       - Output file path (default: stderr)
  *   MEMROGUE_SAMPLE_RATE  - Sampling rate 1-100 (100 = track all, 1 = 1%)
+ *   MEMROGUE_SAMPLING_MODE - Sampling mode ("random", "deterministic") [MEMRO-21]
  *   MEMROGUE_BACKTRACE    - Enable backtraces ("0", "1", "true", "false")
  *   MEMROGUE_VERBOSITY    - Verbosity level (0=quiet, 1=normal, 2=verbose, 3=debug)
  *   MEMROGUE_MAX_DEPTH    - Maximum backtrace depth (1-64)
  *   MEMROGUE_REPORT_ON_EXIT - Generate report on program exit ("0", "1")
  *   MEMROGUE_DETECT_DOUBLE_FREE - Detect double-free errors ("0", "1")
  *   MEMROGUE_DETECT_INVALID_FREE - Detect invalid free errors ("0", "1")
+ *
+ * Sampling Modes (MEMRO-21):
+ *   - random: Each allocation has sample_rate% probability of being tracked.
+ *             More statistically representative for varied allocation patterns.
+ *   - deterministic: Track every Nth allocation (N = 100/sample_rate).
+ *             Predictable, reproducible, minimal overhead.
  *
  * Thread Safety:
  *   - config_load() should be called once at initialization
@@ -25,6 +32,7 @@
  *   - To avoid race conditions during reload, callers must either avoid concurrent reloads or use config_load_into() to obtain a local, consistent copy.
  *
  * MEMRO-20: Environment Variable Configuration
+ * MEMRO-21: Sampling Mode
  */
 
 #ifndef MEMROGUE_CONFIG_H
@@ -48,6 +56,32 @@
 #define MEMROGUE_ENV_REPORT_ON_EXIT     "MEMROGUE_REPORT_ON_EXIT"
 #define MEMROGUE_ENV_DETECT_DOUBLE_FREE "MEMROGUE_DETECT_DOUBLE_FREE"
 #define MEMROGUE_ENV_DETECT_INVALID_FREE "MEMROGUE_DETECT_INVALID_FREE"
+#define MEMROGUE_ENV_SAMPLING_MODE       "MEMROGUE_SAMPLING_MODE"
+
+/* ============================================================================
+ * Sampling Mode
+ * ============================================================================ */
+
+/**
+ * Sampling mode for allocation tracking.
+ *
+ * MEMRO-21: Sampling Mode
+ */
+typedef enum {
+    /**
+     * Random sampling using fast PRNG.
+     * Each allocation has sample_rate% probability of being tracked.
+     * More statistically representative for varied allocation patterns.
+     */
+    MEMROGUE_SAMPLING_RANDOM = 0,
+    
+    /**
+     * Deterministic sampling: track every Nth allocation.
+     * N = 100 / sample_rate (e.g., sample_rate=10 means every 10th allocation).
+     * Predictable, reproducible, lower overhead than random.
+     */
+    MEMROGUE_SAMPLING_DETERMINISTIC = 1
+} memrogue_sampling_mode_t;
 
 /* ============================================================================
  * Configuration Limits
@@ -93,6 +127,9 @@ typedef struct {
     bool backtrace_enabled;         /**< Capture backtraces for allocations */
     int sample_rate;                /**< Sampling percentage (1-100) */
     int max_backtrace_depth;        /**< Maximum backtrace frames to capture */
+    
+    /* Sampling mode (MEMRO-21) */
+    memrogue_sampling_mode_t sampling_mode;  /**< Random or deterministic sampling */
     
     /* Output options */
     char output_path[MEMROGUE_CONFIG_MAX_OUTPUT_PATH]; /**< Output file path */
@@ -200,6 +237,37 @@ bool config_backtraces_enabled(void);
  * @return true if allocation should be tracked
  */
 bool config_should_sample(void);
+
+/**
+ * Get the current sampling mode.
+ *
+ * MEMRO-21: Sampling Mode
+ *
+ * @return Current sampling mode (random or deterministic)
+ */
+memrogue_sampling_mode_t config_get_sampling_mode(void);
+
+/**
+ * Get the current sample rate.
+ *
+ * MEMRO-21: Sampling Mode
+ *
+ * @return Sample rate percentage (1-100)
+ */
+int config_get_sample_rate(void);
+
+/**
+ * Reset deterministic sampling counter.
+ *
+ * For deterministic sampling mode, resets the internal counter
+ * that tracks which allocations to sample. Useful for testing
+ * or when starting a new measurement period.
+ *
+ * Thread-safe: Uses thread-local counter.
+ *
+ * MEMRO-21: Sampling Mode
+ */
+void config_reset_sampling_counter(void);
 
 /**
  * Get the current verbosity level.

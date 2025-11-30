@@ -13,6 +13,7 @@
  * - No memory leaks (all allocations are static or managed)
  *
  * MEMRO-20: Environment Variable Configuration
+ * MEMRO-21: Sampling Mode (random/deterministic)
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -60,6 +61,12 @@ static pthread_mutex_t g_output_mutex = PTHREAD_MUTEX_INITIALIZER;
  */
 static _Thread_local uint32_t tl_prng_state = 0;
 static _Thread_local bool tl_prng_initialized = false;
+
+/**
+ * Thread-local deterministic sampling counter.
+ * MEMRO-21: Sampling Mode
+ */
+static _Thread_local uint64_t tl_sample_counter = 0;
 
 /* ============================================================================
  * Internal Utilities
@@ -110,6 +117,59 @@ static void str_to_lower(char* str) {
     for (char* p = str; *p; p++) {
         *p = (char)tolower((unsigned char)*p);
     }
+}
+
+/**
+ * Parse sampling mode from environment variable.
+ * MEMRO-21: Sampling Mode
+ *
+ * Recognizes: "random", "rand", "r" as random mode
+ *             "deterministic", "det", "d", "nth" as deterministic mode
+ * Case-insensitive. Default is random mode.
+ *
+ * @param env_name Environment variable name
+ * @param default_mode Value to return if variable is not set or invalid
+ * @return Parsed sampling mode
+ */
+static memrogue_sampling_mode_t parse_sampling_mode_env(
+    const char* env_name, memrogue_sampling_mode_t default_mode) {
+    
+    if (env_name == NULL) {
+        return default_mode;
+    }
+    
+    const char* value = getenv(env_name);
+    if (value == NULL || *value == '\0') {
+        return default_mode;
+    }
+    
+    /* Make a lowercase copy for comparison */
+    char buffer[32];
+    size_t len = strlen(value);
+    if (len >= sizeof(buffer)) {
+        return default_mode; /* Value too long to be valid */
+    }
+    
+    memcpy(buffer, value, len + 1);
+    str_to_lower(buffer);
+    
+    /* Check for random mode values */
+    if (strcmp(buffer, "random") == 0 ||
+        strcmp(buffer, "rand") == 0 ||
+        strcmp(buffer, "r") == 0) {
+        return MEMROGUE_SAMPLING_RANDOM;
+    }
+    
+    /* Check for deterministic mode values */
+    if (strcmp(buffer, "deterministic") == 0 ||
+        strcmp(buffer, "det") == 0 ||
+        strcmp(buffer, "d") == 0 ||
+        strcmp(buffer, "nth") == 0) {
+        return MEMROGUE_SAMPLING_DETERMINISTIC;
+    }
+    
+    /* Invalid value, use default */
+    return default_mode;
 }
 
 /* ============================================================================
@@ -236,6 +296,9 @@ void config_init_defaults(memrogue_config_t* config) {
     config->sample_rate = MEMROGUE_CONFIG_DEFAULT_SAMPLE_RATE;
     config->max_backtrace_depth = MEMROGUE_CONFIG_DEFAULT_MAX_DEPTH;
     
+    /* Sampling mode (MEMRO-21) - default to random */
+    config->sampling_mode = MEMROGUE_SAMPLING_RANDOM;
+    
     /* Output options */
     config->output_path[0] = '\0';
     config->output_to_file = false;
@@ -271,6 +334,10 @@ bool config_load_into(memrogue_config_t* config) {
         MEMROGUE_CONFIG_DEFAULT_SAMPLE_RATE,
         MEMROGUE_CONFIG_MIN_SAMPLE_RATE,
         MEMROGUE_CONFIG_MAX_SAMPLE_RATE);
+    
+    /* Parse sampling mode (MEMRO-21) */
+    config->sampling_mode = parse_sampling_mode_env(
+        MEMROGUE_ENV_SAMPLING_MODE, MEMROGUE_SAMPLING_RANDOM);
     
     config->max_backtrace_depth = config_parse_int_env(
         MEMROGUE_ENV_MAX_DEPTH,
@@ -381,9 +448,39 @@ bool config_should_sample(void) {
         return false;
     }
     
-    /* Random sampling based on rate */
+    /* MEMRO-21: Check sampling mode */
+    if (cfg->sampling_mode == MEMROGUE_SAMPLING_DETERMINISTIC) {
+        /* Deterministic sampling: track every Nth allocation
+         * N = 100 / sample_rate
+         * For sample_rate=10, N=10, so every 10th allocation is tracked
+         * For sample_rate=1, N=100, so every 100th allocation is tracked
+         */
+        tl_sample_counter++;
+        /* Defensive check against division by zero (should never happen due to config validation) */
+        if (cfg->sample_rate == 0) {
+            return false;
+        }
+        uint64_t interval = 100 / (uint64_t)cfg->sample_rate;
+        return (tl_sample_counter % interval) == 0;
+    }
+    
+    /* Random sampling based on rate (default) */
     uint32_t threshold = (uint32_t)((uint64_t)cfg->sample_rate * UINT32_MAX / 100);
     return prng_next() < threshold;
+}
+
+memrogue_sampling_mode_t config_get_sampling_mode(void) {
+    const memrogue_config_t* cfg = config_get();
+    return cfg ? cfg->sampling_mode : MEMROGUE_SAMPLING_RANDOM;
+}
+
+int config_get_sample_rate(void) {
+    const memrogue_config_t* cfg = config_get();
+    return cfg ? cfg->sample_rate : MEMROGUE_CONFIG_DEFAULT_SAMPLE_RATE;
+}
+
+void config_reset_sampling_counter(void) {
+    tl_sample_counter = 0;
 }
 
 memrogue_verbosity_t config_get_verbosity(void) {
@@ -454,10 +551,14 @@ void config_print(const memrogue_config_t* config, FILE* stream) {
         config = config_get();
     }
     
+    const char* mode_str = (config->sampling_mode == MEMROGUE_SAMPLING_DETERMINISTIC)
+                           ? "deterministic" : "random";
+    
     fprintf(stream, "MemRogue Configuration:\n");
     fprintf(stream, "  enabled:             %s\n", config->enabled ? "true" : "false");
     fprintf(stream, "  backtrace_enabled:   %s\n", config->backtrace_enabled ? "true" : "false");
     fprintf(stream, "  sample_rate:         %d%%\n", config->sample_rate);
+    fprintf(stream, "  sampling_mode:       %s\n", mode_str);
     fprintf(stream, "  max_backtrace_depth: %d\n", config->max_backtrace_depth);
     fprintf(stream, "  output_to_file:      %s\n", config->output_to_file ? "true" : "false");
     if (config->output_to_file) {
@@ -478,13 +579,17 @@ int config_to_string(const memrogue_config_t* config, char* buffer, size_t buffe
         config = config_get();
     }
     
+    const char* mode_str = (config->sampling_mode == MEMROGUE_SAMPLING_DETERMINISTIC)
+                           ? "deterministic" : "random";
+    
     int written = snprintf(buffer, buffer_size,
-        "enabled=%s, backtrace=%s, sample_rate=%d%%, max_depth=%d, "
+        "enabled=%s, backtrace=%s, sample_rate=%d%%, sampling_mode=%s, max_depth=%d, "
         "output=%s, verbosity=%d, report_on_exit=%s, "
         "detect_double_free=%s, detect_invalid_free=%s",
         config->enabled ? "true" : "false",
         config->backtrace_enabled ? "true" : "false",
         config->sample_rate,
+        mode_str,
         config->max_backtrace_depth,
         config->output_to_file ? config->output_path : "stderr",
         (int)config->verbosity,
