@@ -22,9 +22,11 @@
 #include "memrogue_cli.h"
 #include "memrogue_report.h"
 #include "memrogue_leak_detector.h"
+#include "memrogue_json.h"
 
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -627,8 +629,41 @@ cli_exit_code_t cli_execute(cli_context_t* ctx) {
     /* Generate and write the report */
     cli_info(ctx->options.verbosity, "Generating report...");
     
-    int bytes_written = report_write_to_stream(ctx->formatter, ctx->report,
+    int bytes_written = -1;
+    
+    /* Use JSON formatter if JSON format is requested */
+    if (ctx->options.format == CLI_FORMAT_JSON) {
+        json_config_t json_config;
+        json_config_init(&json_config);
+        json_config.style = JSON_STYLE_PRETTY;
+        json_config.indent_width = 2;
+        json_config.include_backtraces = ctx->options.show_backtraces;
+        json_config.include_addresses = true;
+        json_config.include_metadata = true;
+        
+        json_formatter_t* json_fmt = json_formatter_create_with_config(&json_config);
+        if (json_fmt != NULL) {
+            char* json_output = report_to_json(json_fmt, ctx->report);
+            if (json_output != NULL) {
+                size_t len = strlen(json_output);
+                size_t written = fwrite(json_output, 1, len, ctx->output_stream);
+                if (written == len) {
+                    /* Add trailing newline for pretty output */
+                    fputc('\n', ctx->output_stream);
+                    /* Clamp to INT_MAX to prevent overflow */
+                    size_t total = len + 1;
+                    bytes_written = (total > (size_t)INT_MAX) ? INT_MAX : (int)total;
+                }
+                free(json_output);
+            }
+            json_formatter_destroy(json_fmt);
+        }
+    } else {
+        /* Use text formatter for all other formats */
+        bytes_written = report_write_to_stream(ctx->formatter, ctx->report,
                                                 ctx->output_stream);
+    }
+    
     if (bytes_written < 0) {
         cli_error("failed to write report");
         result = CLI_EXIT_IO_ERROR;
