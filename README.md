@@ -1,8 +1,7 @@
-# MemRogue
-
-<div align="center" src="logo.svg">
-
-**A Lightweight, Production-Ready Memory Debugging Library for C/C++**
+<div align="center">
+<img src="./logo.svg" alt="MemRogue Logo"/>
+<h1>MemRogue</h1>
+<p><strong>A Lightweight, Production-Ready Memory Debugging Library for C/C++</strong></p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![C Standard](https://img.shields.io/badge/C-11%2F17-green.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))

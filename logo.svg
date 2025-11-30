@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 300" width="800" height="300">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 300" width="1200" height="450">
   <defs>
     <linearGradient id="structure-grad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#00c6ff;stop-opacity:1" /> <stop offset="100%" style="stop-color:#0072ff;stop-opacity:1" /> </linearGradient>
