@@ -23,6 +23,7 @@
 #include "memrogue_report.h"
 #include "memrogue_leak_detector.h"
 #include "memrogue_json.h"
+#include "memrogue_csv.h"
 
 #include <errno.h>
 #include <getopt.h>
@@ -657,6 +658,31 @@ cli_exit_code_t cli_execute(cli_context_t* ctx) {
                 free(json_output);
             }
             json_formatter_destroy(json_fmt);
+        }
+    } else if (ctx->options.format == CLI_FORMAT_CSV) {
+        /* Use CSV formatter if CSV format is requested */
+        csv_config_t csv_config;
+        csv_config_init(&csv_config);
+        csv_config.style = CSV_STYLE_WITH_HEADER;
+        csv_config.columns = CSV_COL_DEFAULT;
+        if (ctx->options.show_backtraces) {
+            csv_config.columns |= CSV_COL_BACKTRACE;
+        }
+        csv_config.max_backtrace_depth = ctx->options.max_backtrace_depth;
+        
+        csv_formatter_t* csv_fmt = csv_formatter_create_with_config(&csv_config);
+        if (csv_fmt != NULL) {
+            char* csv_output = report_to_csv(csv_fmt, ctx->report);
+            if (csv_output != NULL) {
+                size_t len = strlen(csv_output);
+                size_t written = fwrite(csv_output, 1, len, ctx->output_stream);
+                if (written == len) {
+                    /* Clamp to INT_MAX to prevent overflow */
+                    bytes_written = (len > (size_t)INT_MAX) ? INT_MAX : (int)len;
+                }
+                free(csv_output);
+            }
+            csv_formatter_destroy(csv_fmt);
         }
     } else {
         /* Use text formatter for all other formats */

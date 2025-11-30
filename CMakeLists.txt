@@ -46,6 +46,7 @@ set(MEMROGUE_CORE_SOURCES
     src/memrogue_cli.c
     src/memrogue_config.c
     src/memrogue_json.c
+    src/memrogue_csv.c
 )
 
 add_library(memrogue_core ${MEMROGUE_CORE_SOURCES})
