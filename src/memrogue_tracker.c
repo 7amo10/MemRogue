@@ -1,4 +1,5 @@
 #include "memrogue_tracker.h"
+#include "memrogue_config.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -25,6 +26,28 @@ void tracker_config_init(tracker_config_t* config) {
     frame_filter_init(&config->frame_filter);
 }
 
+void tracker_config_from_global(tracker_config_t* config) {
+    if (!config) {
+        return;
+    }
+    
+    // Start with defaults
+    tracker_config_init(config);
+    
+    // Load global configuration if not already loaded
+    const memrogue_config_t* global_config = config_get();
+    if (!global_config) {
+        return;
+    }
+    
+    // Apply global config settings to tracker config
+    config->capture_backtraces = global_config->backtrace_enabled;
+    
+    // Note: max_backtrace_depth is handled at capture time, not in frame_filter
+    // The frame_filter.skip_count could be adjusted if needed, but max_depth
+    // is applied during backtrace_capture() itself
+}
+
 // ============================================================================
 // Tracker Lifecycle
 // ============================================================================
@@ -32,6 +55,12 @@ void tracker_config_init(tracker_config_t* config) {
 memory_tracker_t* tracker_create(void) {
     tracker_config_t config;
     tracker_config_init(&config);
+    return tracker_create_with_config(&config);
+}
+
+memory_tracker_t* tracker_create_from_global_config(void) {
+    tracker_config_t config;
+    tracker_config_from_global(&config);
     return tracker_create_with_config(&config);
 }
 

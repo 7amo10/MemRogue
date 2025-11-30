@@ -44,6 +44,7 @@ set(MEMROGUE_CORE_SOURCES
     src/memrogue_invalid_free.c
     src/memrogue_report.c
     src/memrogue_cli.c
+    src/memrogue_config.c
 )
 
 add_library(memrogue_core ${MEMROGUE_CORE_SOURCES})

@@ -78,11 +78,32 @@ typedef struct memory_tracker_internal {
 void tracker_config_init(tracker_config_t* config);
 
 /**
+ * Initialize tracker configuration from global environment config.
+ * 
+ * Loads the global memrogue configuration (if not already loaded) and applies
+ * relevant settings to the tracker config. This allows the tracker to respect
+ * environment variable settings like MEMROGUE_BACKTRACE and MEMROGUE_MAX_DEPTH.
+ * 
+ * @param config The configuration structure to initialize
+ */
+void tracker_config_from_global(tracker_config_t* config);
+
+/**
  * Create a new memory tracker with default configuration.
  * 
  * @return A newly allocated tracker, or NULL on failure
  */
 memory_tracker_t* tracker_create(void);
+
+/**
+ * Create a new memory tracker using global environment configuration.
+ * 
+ * This is the preferred way to create a tracker when respecting environment
+ * variables is desired. It loads the global config and applies settings.
+ * 
+ * @return A newly allocated tracker, or NULL on failure
+ */
+memory_tracker_t* tracker_create_from_global_config(void);
 
 /**
  * Create a new memory tracker with custom configuration.
