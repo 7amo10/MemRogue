@@ -16,21 +16,40 @@
 
 /**
  * Structure to hold allocation statistics.
+ *
+ * MEMRO-21: Added sampling statistics for extrapolation.
+ * When sampling is enabled (sample_rate < 100), the "sampled_*" fields
+ * represent actual observed values, while "estimated_*" fields provide
+ * extrapolated totals based on the sampling rate.
  */
 typedef struct {
-    uint64_t total_allocations;      // Total number of allocations since start
-    uint64_t total_deallocations;    // Total number of deallocations since start
-    uint64_t active_allocations;     // Current number of active allocations
-    uint64_t peak_allocations;       // Peak number of simultaneous allocations
+    /* Core allocation counters */
+    uint64_t total_allocations;      // Total number of tracked allocations since start
+    uint64_t total_deallocations;    // Total number of tracked deallocations since start
+    uint64_t active_allocations;     // Current number of active tracked allocations
+    uint64_t peak_allocations;       // Peak number of simultaneous tracked allocations
     
-    uint64_t total_bytes_allocated;  // Total bytes allocated since start
-    uint64_t total_bytes_freed;      // Total bytes freed since start
-    uint64_t active_bytes;           // Current bytes in use
-    uint64_t peak_bytes;             // Peak bytes in use simultaneously
+    /* Memory counters */
+    uint64_t total_bytes_allocated;  // Total bytes allocated (tracked) since start
+    uint64_t total_bytes_freed;      // Total bytes freed (tracked) since start
+    uint64_t active_bytes;           // Current bytes in use (tracked)
+    uint64_t peak_bytes;             // Peak bytes in use simultaneously (tracked)
     
+    /* Error counters */
     uint64_t failed_allocations;     // Number of failed allocation tracks (internal errors)
     uint64_t double_frees;           // Reserved for future use: double-free detection (not currently implemented)
     uint64_t unknown_frees;          // Number of frees on untracked pointers
+    
+    /* Sampling statistics (MEMRO-21) */
+    uint64_t sampled_allocations;    // Number of allocations that were sampled/tracked
+    uint64_t skipped_allocations;    // Number of allocations skipped due to sampling
+    int sample_rate;                 // Sample rate at time of stats snapshot (1-100)
+    
+    /* Estimated totals (MEMRO-21) - extrapolated based on sample_rate */
+    uint64_t estimated_total_allocations;   // Estimated total allocations (sampled / (rate/100))
+    uint64_t estimated_total_bytes;         // Estimated total bytes allocated
+    uint64_t estimated_active_allocations;  // Estimated current active allocations
+    uint64_t estimated_active_bytes;        // Estimated current bytes in use
 } tracker_stats_t;
 
 // ============================================================================
@@ -78,11 +97,32 @@ typedef struct memory_tracker_internal {
 void tracker_config_init(tracker_config_t* config);
 
 /**
+ * Initialize tracker configuration from global environment config.
+ * 
+ * Loads the global memrogue configuration (if not already loaded) and applies
+ * relevant settings to the tracker config. This allows the tracker to respect
+ * environment variable settings like MEMROGUE_BACKTRACE and MEMROGUE_MAX_DEPTH.
+ * 
+ * @param config The configuration structure to initialize
+ */
+void tracker_config_from_global(tracker_config_t* config);
+
+/**
  * Create a new memory tracker with default configuration.
  * 
  * @return A newly allocated tracker, or NULL on failure
  */
 memory_tracker_t* tracker_create(void);
+
+/**
+ * Create a new memory tracker using global environment configuration.
+ * 
+ * This is the preferred way to create a tracker when respecting environment
+ * variables is desired. It loads the global config and applies settings.
+ * 
+ * @return A newly allocated tracker, or NULL on failure
+ */
+memory_tracker_t* tracker_create_from_global_config(void);
 
 /**
  * Create a new memory tracker with custom configuration.
@@ -156,6 +196,23 @@ allocation_info_t* lookup_allocation(memory_tracker_t* tracker, void* ptr);
  * @param out_stats Output structure to fill with current stats
  */
 void tracker_get_stats(memory_tracker_t* tracker, tracker_stats_t* out_stats);
+
+/**
+ * Get statistics with extrapolated values based on sample rate.
+ *
+ * When sampling is enabled, this function calculates estimated totals
+ * by extrapolating from the sampled data. The estimated_* fields in
+ * the returned stats are populated.
+ *
+ * MEMRO-21: Sampling Mode
+ *
+ * @param tracker The memory tracker
+ * @param out_stats Output structure to fill with stats (includes estimated values)
+ * @param sample_rate The sample rate used for extrapolation (1-100)
+ */
+void tracker_get_extrapolated_stats(memory_tracker_t* tracker, 
+                                     tracker_stats_t* out_stats,
+                                     int sample_rate);
 
 /**
  * Reset statistics counters to zero.

@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,7 @@
 #include <malloc.h>
 #endif
 
+#include "memrogue_config.h"
 #include "memrogue_hash_table.h"
 
 typedef void *(*malloc_fn)(size_t size);
@@ -30,6 +32,12 @@ static hash_table_t *g_alloc_table = NULL;
 static __thread bool g_reentry_guard = false;
 static bool g_shutdown = false;
 static bool g_initialized = false;
+static bool g_tracking_enabled = true;  /* Controlled by MEMROGUE_ENABLED */
+
+/* MEMRO-21: Sampling statistics (atomic for thread safety) */
+static _Atomic uint64_t g_sampled_allocations = 0;
+static _Atomic uint64_t g_skipped_allocations = 0;
+static _Atomic uint64_t g_total_sampled_bytes = 0;
 
 #if defined(__GLIBC__)
 extern void *__libc_malloc(size_t size);
@@ -85,24 +93,49 @@ static inline void memrogue_raw_free(void *ptr) {
 }
 
 static void memrogue_report(const char *message, void *ptr) {
+    const memrogue_config_t *cfg = config_get();
+    if (cfg && cfg->verbosity == MEMROGUE_VERBOSITY_QUIET) {
+        return;  // Suppress all output in quiet mode
+    }
+    fprintf(stderr, "[MemRogue] %s (ptr=%p)\n", message, ptr);
+}
+
+static void memrogue_verbose_report(const char *message, void *ptr) {
+    const memrogue_config_t *cfg = config_get();
+    if (!cfg || cfg->verbosity < MEMROGUE_VERBOSITY_VERBOSE) {
+        return;  // Only output in verbose or higher verbosity modes
+    }
     fprintf(stderr, "[MemRogue] %s (ptr=%p)\n", message, ptr);
 }
 
 static void memrogue_track_alloc(void *ptr, size_t size) {
-    if (!ptr || !g_alloc_table) {
+    if (!ptr || !g_alloc_table || !g_tracking_enabled) {
         return;
     }
+    
+    /* Apply sampling if configured (MEMRO-21) */
+    if (!config_should_sample()) {
+        atomic_fetch_add(&g_skipped_allocations, 1);
+        return;  /* Skip this allocation based on sampling rate */
+    }
+    
+    /* Track this allocation */
     if (!hash_table_insert(g_alloc_table, ptr, size, "unknown", 0)) {
         memrogue_report("Warning: failed to record allocation", ptr);
+    } else {
+        atomic_fetch_add(&g_sampled_allocations, 1);
+        atomic_fetch_add(&g_total_sampled_bytes, size);
     }
 }
 
 static void memrogue_track_free(void *ptr) {
-    if (!ptr || !g_alloc_table) {
+    if (!ptr || !g_alloc_table || !g_tracking_enabled) {
         return;
     }
     if (!hash_table_remove(g_alloc_table, ptr)) {
-        memrogue_report("Warning: free on untracked pointer", ptr);
+        // Only report if the pointer was actually tracked
+        // (might have been skipped due to sampling)
+        memrogue_verbose_report("Warning: free on untracked pointer", ptr);
     }
 }
 
@@ -120,6 +153,16 @@ static void memrogue_initialize(void) {
     g_initialized = true;
     
     g_reentry_guard = true;
+    
+    // Load configuration from environment variables
+    // This must happen early, before any allocations we want to track
+    config_load();
+    const memrogue_config_t *cfg = config_get();
+    
+    // Check if tracking is enabled via environment variable
+    g_tracking_enabled = config_is_enabled();
+    
+    // Resolve real allocation functions
     dlerror();
     memrogue_assign_symbol((void **)&g_hooks.real_malloc, "malloc");
     memrogue_assign_symbol((void **)&g_hooks.real_calloc, "calloc");
@@ -131,10 +174,24 @@ static void memrogue_initialize(void) {
         fprintf(stderr, "[MemRogue] dlsym error: %s\n", error);
     }
 
-    g_alloc_table = hash_table_create(2048);
-    if (!g_alloc_table) {
-        fprintf(stderr, "[MemRogue] Failed to initialize allocation table\n");
+    /* Only create allocation table if tracking is enabled */
+    if (g_tracking_enabled) {
+        g_alloc_table = hash_table_create(2048);
+        if (!g_alloc_table) {
+            fprintf(stderr, "[MemRogue] Failed to initialize allocation table\n");
+        } else if (cfg && cfg->verbosity >= MEMROGUE_VERBOSITY_VERBOSE) {
+            /* MEMRO-21: Include sampling mode in verbose output */
+            const char *mode_str = (cfg->sampling_mode == MEMROGUE_SAMPLING_DETERMINISTIC)
+                                   ? "deterministic" : "random";
+            fprintf(stderr, "[MemRogue] Initialized with sample_rate=%d%% (%s), backtraces=%s\n",
+                    cfg->sample_rate,
+                    mode_str,
+                    cfg->backtrace_enabled ? "enabled" : "disabled");
+        }
+    } else if (cfg && cfg->verbosity != MEMROGUE_VERBOSITY_QUIET) {
+        fprintf(stderr, "[MemRogue] Tracking disabled via MEMROGUE_ENABLED=0\n");
     }
+    
     g_reentry_guard = false;
 }
 
@@ -232,17 +289,67 @@ __attribute__((destructor))
 static void memrogue_shutdown(void) {
     g_shutdown = true;
     g_reentry_guard = true;
+    
+    const memrogue_config_t *cfg = config_get();
+    /* Default to reporting on exit (true) if config is unavailable */
+    bool report_on_exit = cfg ? cfg->report_on_exit : true;
+    bool quiet = cfg ? (cfg->verbosity == MEMROGUE_VERBOSITY_QUIET) : false;
+    int sample_rate = cfg ? cfg->sample_rate : 100;
+    
     if (g_alloc_table) {
         size_t outstanding = hash_table_count(g_alloc_table);
-        if (outstanding > 0) {
-            fprintf(stderr,
-                    "[MemRogue] Detected %zu outstanding allocation(s) at shutdown\n",
-                    outstanding);
-        } else {
-            fprintf(stderr, "[MemRogue] No outstanding allocations detected\n");
+        
+        if (report_on_exit && !quiet) {
+            /* MEMRO-21: Report sampling statistics and extrapolated values */
+            uint64_t sampled = atomic_load(&g_sampled_allocations);
+            uint64_t skipped = atomic_load(&g_skipped_allocations);
+            uint64_t total_bytes = atomic_load(&g_total_sampled_bytes);
+            
+            if (sample_rate < 100 && (sampled > 0 || skipped > 0)) {
+                /* Calculate extrapolation factor */
+                double factor = 100.0 / (double)sample_rate;
+                uint64_t estimated_outstanding = (uint64_t)((double)outstanding * factor);
+                
+                const char *mode_str = (cfg && cfg->sampling_mode == MEMROGUE_SAMPLING_DETERMINISTIC)
+                                       ? "deterministic" : "random";
+                
+                fprintf(stderr,
+                        "[MemRogue] Sampling Summary (%s mode, %d%% rate):\n"
+                        "[MemRogue]   Sampled allocations: %lu\n"
+                        "[MemRogue]   Skipped allocations: %lu\n"
+                        "[MemRogue]   Sampled bytes: %lu\n",
+                        mode_str, sample_rate,
+                        (unsigned long)sampled,
+                        (unsigned long)skipped,
+                        (unsigned long)total_bytes);
+                
+                if (outstanding > 0) {
+                    fprintf(stderr,
+                            "[MemRogue] Detected %zu outstanding allocation(s) at shutdown (sampled)\n"
+                            "[MemRogue]   Estimated total outstanding: ~%lu\n",
+                            outstanding,
+                            (unsigned long)estimated_outstanding);
+                } else {
+                    fprintf(stderr, "[MemRogue] No outstanding allocations detected (in sampled set)\n");
+                }
+            } else {
+                /* 100% sampling - simple report */
+                if (outstanding > 0) {
+                    fprintf(stderr,
+                            "[MemRogue] Detected %zu outstanding allocation(s) at shutdown\n",
+                            outstanding);
+                } else {
+                    fprintf(stderr, "[MemRogue] No outstanding allocations detected\n");
+                }
+            }
         }
+        
         hash_table_destroy(g_alloc_table);
         g_alloc_table = NULL;
     }
+    
+    /* Close any open output file */
+    config_close_output_stream();
+    
     g_reentry_guard = false;
 }

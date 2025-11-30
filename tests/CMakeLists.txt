@@ -54,6 +54,26 @@ add_executable(test_leak_structures test_leak_structures.c)
 target_link_libraries(test_leak_structures PRIVATE memrogue_core)
 add_test(NAME LeakStructuresTest COMMAND test_leak_structures)
 
+add_executable(test_cli test_cli.c)
+target_link_libraries(test_cli PRIVATE memrogue_core)
+add_test(NAME CLITest COMMAND test_cli)
+
+add_executable(test_config test_config.c)
+target_link_libraries(test_config PRIVATE memrogue_core pthread)
+add_test(NAME ConfigTest COMMAND test_config)
+
+add_executable(test_sampling test_sampling.c)
+target_link_libraries(test_sampling PRIVATE memrogue_core pthread)
+add_test(NAME SamplingTest COMMAND test_sampling)
+
+add_executable(test_json test_json.c)
+target_link_libraries(test_json PRIVATE memrogue_core)
+add_test(NAME JSONTest COMMAND test_json)
+
+add_executable(test_csv test_csv.c)
+target_link_libraries(test_csv PRIVATE memrogue_core)
+add_test(NAME CSVTest COMMAND test_csv)
+
 # Integration test for interception layer
 add_test(NAME InterceptionTest 
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_interception.sh

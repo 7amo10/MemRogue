@@ -1,4 +1,5 @@
 #include "memrogue_tracker.h"
+#include "memrogue_config.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -25,6 +26,28 @@ void tracker_config_init(tracker_config_t* config) {
     frame_filter_init(&config->frame_filter);
 }
 
+void tracker_config_from_global(tracker_config_t* config) {
+    if (!config) {
+        return;
+    }
+    
+    // Start with defaults
+    tracker_config_init(config);
+    
+    // Load global configuration if not already loaded
+    const memrogue_config_t* global_config = config_get();
+    if (!global_config) {
+        return;
+    }
+    
+    // Apply global config settings to tracker config
+    config->capture_backtraces = global_config->backtrace_enabled;
+    
+    // Note: max_backtrace_depth is handled at capture time, not in frame_filter
+    // The frame_filter.skip_count could be adjusted if needed, but max_depth
+    // is applied during backtrace_capture() itself
+}
+
 // ============================================================================
 // Tracker Lifecycle
 // ============================================================================
@@ -32,6 +55,12 @@ void tracker_config_init(tracker_config_t* config) {
 memory_tracker_t* tracker_create(void) {
     tracker_config_t config;
     tracker_config_init(&config);
+    return tracker_create_with_config(&config);
+}
+
+memory_tracker_t* tracker_create_from_global_config(void) {
+    tracker_config_t config;
+    tracker_config_from_global(&config);
     return tracker_create_with_config(&config);
 }
 
@@ -199,6 +228,71 @@ void tracker_get_stats(memory_tracker_t* tracker, tracker_stats_t* out_stats) {
     pthread_mutex_lock(&tracker->stats_lock);
     *out_stats = tracker->stats;
     pthread_mutex_unlock(&tracker->stats_lock);
+    
+    /* Initialize sampling fields if not set (MEMRO-21) */
+    if (out_stats->sample_rate == 0) {
+        out_stats->sample_rate = 100; /* Assume 100% if not set */
+    }
+    
+    /* Set sampled_allocations to total if not tracked separately */
+    if (out_stats->sampled_allocations == 0 && out_stats->total_allocations > 0) {
+        out_stats->sampled_allocations = out_stats->total_allocations;
+    }
+}
+
+void tracker_get_extrapolated_stats(memory_tracker_t* tracker, 
+                                     tracker_stats_t* out_stats,
+                                     int sample_rate) {
+    if (!tracker || !tracker->initialized || !out_stats) {
+        if (out_stats) {
+            memset(out_stats, 0, sizeof(*out_stats));
+        }
+        return;
+    }
+    
+    /* Clamp sample_rate to valid range */
+    if (sample_rate < 1) sample_rate = 1;
+    if (sample_rate > 100) sample_rate = 100;
+    
+    /* Get the raw stats */
+    tracker_get_stats(tracker, out_stats);
+    
+    /* Store sample rate */
+    out_stats->sample_rate = sample_rate;
+    
+    /* Calculate extrapolation factor
+     * If sample_rate is 10%, we multiply observed values by 10 to estimate totals
+     * factor = 100 / sample_rate
+     *
+     * Note on statistical limitations: The extrapolation assumes allocations and
+     * deallocations are evenly distributed. Since only sampled allocations are
+     * tracked, but deallocations only apply to the sampled set, the extrapolated
+     * active counts may have higher variance than extrapolated totals. For more
+     * accurate active allocation estimates, use higher sample rates.
+     */
+    double factor = 100.0 / (double)sample_rate;
+    
+    /* For 100% sampling, no extrapolation needed */
+    if (sample_rate >= 100) {
+        out_stats->estimated_total_allocations = out_stats->total_allocations;
+        out_stats->estimated_total_bytes = out_stats->total_bytes_allocated;
+        out_stats->estimated_active_allocations = out_stats->active_allocations;
+        out_stats->estimated_active_bytes = out_stats->active_bytes;
+        return;
+    }
+    
+    /* Extrapolate estimates from sampled data */
+    out_stats->estimated_total_allocations = 
+        (uint64_t)((double)out_stats->total_allocations * factor);
+    out_stats->estimated_total_bytes = 
+        (uint64_t)((double)out_stats->total_bytes_allocated * factor);
+    out_stats->estimated_active_allocations = 
+        (uint64_t)((double)out_stats->active_allocations * factor);
+    out_stats->estimated_active_bytes = 
+        (uint64_t)((double)out_stats->active_bytes * factor);
+    
+    /* Record sampled allocations as the actual tracked count */
+    out_stats->sampled_allocations = out_stats->total_allocations;
 }
 
 void tracker_reset_stats(memory_tracker_t* tracker) {
@@ -269,54 +363,108 @@ char* tracker_format_stats(memory_tracker_t* tracker) {
         return NULL;
     }
     
-    // Get a snapshot of stats
+    /* Get extrapolated stats using current sample rate */
     tracker_stats_t stats;
-    tracker_get_stats(tracker, &stats);
+    int sample_rate = config_get_sample_rate();
+    tracker_get_extrapolated_stats(tracker, &stats, sample_rate);
     
-    // Calculate average from the snapshot to ensure consistency
+    /* Calculate average from the snapshot to ensure consistency */
     double avg_size = (stats.total_allocations == 0) ? 0.0 
         : (double)stats.total_bytes_allocated / (double)stats.total_allocations;
     
-    // Calculate required buffer size and allocate
-    // Using a generous buffer size to accommodate all statistics
-    const size_t buffer_size = 1024;
+    /* Calculate required buffer size and allocate
+     * Using a larger buffer size to accommodate sampling info */
+    const size_t buffer_size = 2048;
     char* buffer = (char*)malloc(buffer_size);
     if (!buffer) {
         return NULL;
     }
     
-    int written = snprintf(buffer, buffer_size,
-        "=== Memory Tracker Statistics ===\n"
-        "Allocations:\n"
-        "  Total:    %" PRIu64 "\n"
-        "  Active:   %" PRIu64 "\n"
-        "  Peak:     %" PRIu64 "\n"
-        "Deallocations:\n"
-        "  Total:    %" PRIu64 "\n"
-        "Memory:\n"
-        "  Total allocated: %" PRIu64 " bytes\n"
-        "  Total freed:     %" PRIu64 " bytes\n"
-        "  Active:          %" PRIu64 " bytes\n"
-        "  Peak:            %" PRIu64 " bytes\n"
-        "  Average size:    %.2f bytes\n"
-        "Errors:\n"
-        "  Failed allocs:   %" PRIu64 "\n"
-        "  Unknown frees:   %" PRIu64 "\n"
-        "=================================",
-        stats.total_allocations,
-        stats.active_allocations,
-        stats.peak_allocations,
-        stats.total_deallocations,
-        stats.total_bytes_allocated,
-        stats.total_bytes_freed,
-        stats.active_bytes,
-        stats.peak_bytes,
-        avg_size,
-        stats.failed_allocations,
-        stats.unknown_frees);
+    int written;
+    
+    /* Format differently based on whether sampling is active */
+    if (sample_rate < 100) {
+        written = snprintf(buffer, buffer_size,
+            "=== Memory Tracker Statistics ===\n"
+            "Sampling:\n"
+            "  Sample rate:     %d%%\n"
+            "  Sampled allocs:  %" PRIu64 "\n"
+            "  Skipped allocs:  %" PRIu64 "\n"
+            "Allocations (sampled):\n"
+            "  Total:    %" PRIu64 "\n"
+            "  Active:   %" PRIu64 "\n"
+            "  Peak:     %" PRIu64 "\n"
+            "Allocations (estimated):\n"
+            "  Total:    ~%" PRIu64 "\n"
+            "  Active:   ~%" PRIu64 "\n"
+            "Deallocations:\n"
+            "  Total:    %" PRIu64 "\n"
+            "Memory (sampled):\n"
+            "  Total allocated: %" PRIu64 " bytes\n"
+            "  Total freed:     %" PRIu64 " bytes\n"
+            "  Active:          %" PRIu64 " bytes\n"
+            "  Peak:            %" PRIu64 " bytes\n"
+            "  Average size:    %.2f bytes\n"
+            "Memory (estimated):\n"
+            "  Total allocated: ~%" PRIu64 " bytes\n"
+            "  Active:          ~%" PRIu64 " bytes\n"
+            "Errors:\n"
+            "  Failed allocs:   %" PRIu64 "\n"
+            "  Unknown frees:   %" PRIu64 "\n"
+            "=================================",
+            stats.sample_rate,
+            stats.sampled_allocations,
+            stats.skipped_allocations,
+            stats.total_allocations,
+            stats.active_allocations,
+            stats.peak_allocations,
+            stats.estimated_total_allocations,
+            stats.estimated_active_allocations,
+            stats.total_deallocations,
+            stats.total_bytes_allocated,
+            stats.total_bytes_freed,
+            stats.active_bytes,
+            stats.peak_bytes,
+            avg_size,
+            stats.estimated_total_bytes,
+            stats.estimated_active_bytes,
+            stats.failed_allocations,
+            stats.unknown_frees);
+    } else {
+        /* 100% sampling - simpler format without estimates */
+        written = snprintf(buffer, buffer_size,
+            "=== Memory Tracker Statistics ===\n"
+            "Allocations:\n"
+            "  Total:    %" PRIu64 "\n"
+            "  Active:   %" PRIu64 "\n"
+            "  Peak:     %" PRIu64 "\n"
+            "Deallocations:\n"
+            "  Total:    %" PRIu64 "\n"
+            "Memory:\n"
+            "  Total allocated: %" PRIu64 " bytes\n"
+            "  Total freed:     %" PRIu64 " bytes\n"
+            "  Active:          %" PRIu64 " bytes\n"
+            "  Peak:            %" PRIu64 " bytes\n"
+            "  Average size:    %.2f bytes\n"
+            "Errors:\n"
+            "  Failed allocs:   %" PRIu64 "\n"
+            "  Unknown frees:   %" PRIu64 "\n"
+            "=================================",
+            stats.total_allocations,
+            stats.active_allocations,
+            stats.peak_allocations,
+            stats.total_deallocations,
+            stats.total_bytes_allocated,
+            stats.total_bytes_freed,
+            stats.active_bytes,
+            stats.peak_bytes,
+            avg_size,
+            stats.failed_allocations,
+            stats.unknown_frees);
+    }
     
     if (written < 0 || (size_t)written >= buffer_size) {
-        // snprintf failed or truncated
+        /* snprintf failed or truncated */
         free(buffer);
         return NULL;
     }
