@@ -62,6 +62,10 @@ add_executable(test_config test_config.c)
 target_link_libraries(test_config PRIVATE memrogue_core pthread)
 add_test(NAME ConfigTest COMMAND test_config)
 
+add_executable(test_sampling test_sampling.c)
+target_link_libraries(test_sampling PRIVATE memrogue_core pthread)
+add_test(NAME SamplingTest COMMAND test_sampling)
+
 # Integration test for interception layer
 add_test(NAME InterceptionTest 
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_interception.sh
