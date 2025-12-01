@@ -79,3 +79,84 @@ add_test(NAME InterceptionTest
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test_interception.sh
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
+set_tests_properties(InterceptionTest PROPERTIES
+    ENVIRONMENT "BUILD_DIR=${CMAKE_BINARY_DIR}"
+)
+
+# ============================================================================
+# Integration Tests (MEMRO-25)
+# ============================================================================
+
+# Integration test common header
+set(INTEGRATION_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/integration)
+
+# Integration test: Simple leak patterns
+add_executable(integ_simple_leaks 
+    integration/test_simple_leaks.c
+)
+target_include_directories(integ_simple_leaks PRIVATE ${INTEGRATION_INCLUDE_DIR})
+target_link_libraries(integ_simple_leaks PRIVATE memrogue_core pthread)
+target_compile_options(integ_simple_leaks PRIVATE -rdynamic)
+add_test(NAME IntegrationSimpleLeaks COMMAND integ_simple_leaks)
+
+# Integration test: Complex allocation patterns
+add_executable(integ_complex_patterns 
+    integration/test_complex_patterns.c
+)
+target_include_directories(integ_complex_patterns PRIVATE ${INTEGRATION_INCLUDE_DIR})
+target_link_libraries(integ_complex_patterns PRIVATE memrogue_core pthread)
+target_compile_options(integ_complex_patterns PRIVATE -rdynamic)
+add_test(NAME IntegrationComplexPatterns COMMAND integ_complex_patterns)
+
+# Integration test: Multithreaded scenarios
+add_executable(integ_multithreaded 
+    integration/test_multithreaded_integration.c
+)
+target_include_directories(integ_multithreaded PRIVATE ${INTEGRATION_INCLUDE_DIR})
+target_link_libraries(integ_multithreaded PRIVATE memrogue_core pthread)
+target_compile_options(integ_multithreaded PRIVATE -rdynamic)
+add_test(NAME IntegrationMultithreaded COMMAND integ_multithreaded)
+
+# Integration test: Error conditions
+add_executable(integ_error_conditions 
+    integration/test_error_conditions.c
+)
+target_include_directories(integ_error_conditions PRIVATE ${INTEGRATION_INCLUDE_DIR})
+target_link_libraries(integ_error_conditions PRIVATE memrogue_core pthread)
+target_compile_options(integ_error_conditions PRIVATE -rdynamic)
+add_test(NAME IntegrationErrorConditions COMMAND integ_error_conditions)
+
+# Integration test: Report formats
+add_executable(integ_report_formats 
+    integration/test_report_formats.c
+)
+target_include_directories(integ_report_formats PRIVATE ${INTEGRATION_INCLUDE_DIR})
+target_link_libraries(integ_report_formats PRIVATE memrogue_core pthread)
+target_compile_options(integ_report_formats PRIVATE -rdynamic)
+add_test(NAME IntegrationReportFormats COMMAND integ_report_formats)
+
+# ============================================================================
+# Integration Test Runner
+# ============================================================================
+
+add_custom_target(integration_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/integration/run_integration_tests.sh
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    DEPENDS 
+        integ_simple_leaks 
+        integ_complex_patterns 
+        integ_multithreaded 
+        integ_error_conditions 
+        integ_report_formats
+    COMMENT "Running integration tests"
+)
+
+# Group all integration tests under 'IntegrationTests' label
+set_tests_properties(
+    IntegrationSimpleLeaks
+    IntegrationComplexPatterns
+    IntegrationMultithreaded
+    IntegrationErrorConditions
+    IntegrationReportFormats
+    PROPERTIES LABELS "integration"
+)
