@@ -5,7 +5,20 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}/../build"
+
+# Try to find the build directory - check multiple possible locations
+if [ -n "$BUILD_DIR" ]; then
+    # Use environment variable if set
+    :
+elif [ -f "${SCRIPT_DIR}/../build-cov/lib/libmemrogue_intercept.so" ]; then
+    BUILD_DIR="${SCRIPT_DIR}/../build-cov"
+elif [ -f "${SCRIPT_DIR}/../build/lib/libmemrogue_intercept.so" ]; then
+    BUILD_DIR="${SCRIPT_DIR}/../build"
+else
+    # Default to build
+    BUILD_DIR="${SCRIPT_DIR}/../build"
+fi
+
 LIB_PATH="${BUILD_DIR}/lib/libmemrogue_intercept.so"
 TEST_APP="${BUILD_DIR}/bin/memrogue_example"
 

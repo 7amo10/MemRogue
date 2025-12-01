@@ -1,0 +1,38 @@
+# ============================================================================
+# MemRogue Valgrind Suppressions File
+# ============================================================================
+
+# Suppress dlopen-related leaks (system libraries)
+{
+   dlopen_leak
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:dlopen
+}
+
+{
+   pthread_create_leak
+   Memcheck:Leak
+   match-leak-kinds: possible
+   ...
+   fun:pthread_create*
+}
+
+# Suppress backtrace-related false positives
+{
+   backtrace_symbols_leak
+   Memcheck:Leak
+   match-leak-kinds: possible
+   ...
+   fun:backtrace_symbols
+}
+
+# Suppress system library leaks
+{
+   libc_static_leak
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   obj:/lib/x86_64-linux-gnu/libc*.so*
+}
