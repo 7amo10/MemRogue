@@ -28,12 +28,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04, ubuntu-20.04]
+        os: [ubuntu-22.04, ubuntu-24.04]
         include:
           - os: ubuntu-22.04
             artifact_name: memrogue-linux-x86_64-ubuntu22
-          - os: ubuntu-20.04
-            artifact_name: memrogue-linux-x86_64-ubuntu20
+          - os: ubuntu-24.04
+            artifact_name: memrogue-linux-x86_64-ubuntu24
 
     steps:
     - name: Checkout
@@ -219,7 +219,7 @@ jobs:
         | Platform | File |
         |----------|------|
         | Ubuntu 22.04 (x86-64) | `memrogue-linux-x86_64-ubuntu22.tar.gz` |
-        | Ubuntu 20.04 (x86-64) | `memrogue-linux-x86_64-ubuntu20.tar.gz` |
+        | Ubuntu 24.04 (x86-64) | `memrogue-linux-x86_64-ubuntu24.tar.gz` |
         | Source (tar.gz) | `memrogue-${{ steps.version.outputs.version }}-source.tar.gz` |
         | Source (zip) | `memrogue-${{ steps.version.outputs.version }}-source.zip` |
         
