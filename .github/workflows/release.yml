@@ -161,7 +161,7 @@ jobs:
   # ============================================================================
   release:
     name: Create Release
-    needs: [build, test, source]
+    needs: [build, test, source, debian-package, rpm-package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -191,6 +191,8 @@ jobs:
         mkdir -p release-assets
         find artifacts -name "*.tar.gz" -exec cp {} release-assets/ \;
         find artifacts -name "*.zip" -exec cp {} release-assets/ \;
+        find artifacts -name "*.deb" -exec cp {} release-assets/ \;
+        find artifacts -name "*.rpm" -exec cp {} release-assets/ \;
         ls -la release-assets/
 
     - name: Generate Release Notes
@@ -220,6 +222,8 @@ jobs:
         |----------|------|
         | Ubuntu 22.04 (x86-64) | `memrogue-linux-x86_64-ubuntu22.tar.gz` |
         | Ubuntu 24.04 (x86-64) | `memrogue-linux-x86_64-ubuntu24.tar.gz` |
+        | Debian/Ubuntu (.deb) | `memrogue_${{ steps.version.outputs.version }}-1_amd64.deb` |
+        | Fedora/RHEL (.rpm) | `memrogue-${{ steps.version.outputs.version }}-1.x86_64.rpm` |
         | Source (tar.gz) | `memrogue-${{ steps.version.outputs.version }}-source.tar.gz` |
         | Source (zip) | `memrogue-${{ steps.version.outputs.version }}-source.zip` |
         
@@ -293,16 +297,73 @@ jobs:
 
     - name: Build Debian Package
       run: |
-        dpkg-buildpackage -us -uc -b || echo "Debian package build attempted"
+        VERSION=${{ steps.version.outputs.version }}
+        # Update debian/changelog with current version
+        sed -i "s/memrogue (.*)/memrogue (${VERSION}-1)/" debian/changelog
+        # Build the package
+        dpkg-buildpackage -us -uc -b
         # Move .deb files to workspace for artifact upload
         mkdir -p debian-packages
-        cp ../*.deb debian-packages/ 2>/dev/null || true
+        mv ../*.deb debian-packages/ 2>/dev/null || echo "No .deb files found in parent"
+        ls -la debian-packages/ || true
 
     - name: Upload Debian Package
       uses: actions/upload-artifact@v4
-      if: always()
       with:
         name: debian-package
-        path: debian-packages/*.deb
-        if-no-files-found: ignore
+        path: debian-packages/
+        if-no-files-found: warn
+        retention-days: 5
+
+  # ============================================================================
+  # Generate RPM Package
+  # ============================================================================
+  rpm-package:
+    name: Build RPM Package
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        dnf install -y cmake gcc gcc-c++ make rpm-build rpmdevtools
+
+    - name: Get Version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Setup RPM Build Environment
+      run: |
+        rpmdev-setuptree
+        VERSION=${{ steps.version.outputs.version }}
+        
+        # Create source tarball
+        mkdir -p memrogue-${VERSION}
+        cp -r src include cmake CMakeLists.txt LICENSE README.md scripts memrogue-${VERSION}/
+        tar -czvf ~/rpmbuild/SOURCES/memrogue-${VERSION}.tar.gz memrogue-${VERSION}
+        
+        # Update spec file version and copy
+        sed "s/Version:.*/Version:        ${VERSION}/" packaging/rpm/memrogue.spec > ~/rpmbuild/SPECS/memrogue.spec
+
+    - name: Build RPM Package
+      run: |
+        rpmbuild -bb ~/rpmbuild/SPECS/memrogue.spec
+        mkdir -p rpm-packages
+        cp ~/rpmbuild/RPMS/*/*.rpm rpm-packages/
+        ls -la rpm-packages/
+
+    - name: Upload RPM Package
+      uses: actions/upload-artifact@v4
+      with:
+        name: rpm-package
+        path: rpm-packages/
+        if-no-files-found: warn
         retention-days: 5
