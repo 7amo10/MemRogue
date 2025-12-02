@@ -1,0 +1,4 @@
+usr/include/memrogue/
+usr/lib/*/libmemrogue_core.a
+usr/lib/*/pkgconfig/memrogue.pc
+usr/lib/*/cmake/MemRogue/

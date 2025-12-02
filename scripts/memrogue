@@ -1,0 +1,362 @@
+#!/bin/bash
+#
+# MemRogue - Memory Debugging Wrapper Script
+#
+# Usage:
+#   memrogue [OPTIONS] <program> [program args...]
+#   memrogue --analyze <report_file>
+#   memrogue --help
+#
+# This script simplifies using MemRogue by handling LD_PRELOAD
+# and environment configuration automatically.
+#
+
+set -e
+
+VERSION="1.0.0"
+SCRIPT_NAME="$(basename "$0")"
+
+# Find library path - check multiple locations
+find_memrogue_lib() {
+    local lib_name="libmemrogue_intercept.so"
+    local search_paths=(
+        # Installed locations
+        "/usr/lib/$lib_name"
+        "/usr/lib64/$lib_name"
+        "/usr/local/lib/$lib_name"
+        "/usr/local/lib64/$lib_name"
+        "$HOME/.local/lib/$lib_name"
+        # Build directory (for development)
+        "$(dirname "$0")/../lib/$lib_name"
+        "./build/lib/$lib_name"
+        "./lib/$lib_name"
+    )
+    
+    for path in "${search_paths[@]}"; do
+        if [[ -f "$path" ]]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
+# Find memrogue-report binary
+find_memrogue_report() {
+    local bin_name="memrogue-report"
+    local search_paths=(
+        "/usr/bin/$bin_name"
+        "/usr/local/bin/$bin_name"
+        "$HOME/.local/bin/$bin_name"
+        "$(dirname "$0")/../bin/$bin_name"
+        "./build/bin/$bin_name"
+        "./bin/$bin_name"
+    )
+    
+    for path in "${search_paths[@]}"; do
+        if [[ -x "$path" ]]; then
+            echo "$path"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Default configuration
+OUTPUT_FORMAT="text"
+OUTPUT_FILE=""
+STACK_DEPTH=""
+SAMPLING_RATE=""
+VERBOSE=0
+QUIET=0
+
+usage() {
+    cat << EOF
+${CYAN}MemRogue${NC} - Memory Debugging Made Easy (v${VERSION})
+
+${GREEN}USAGE:${NC}
+    $SCRIPT_NAME [OPTIONS] <program> [program args...]
+    $SCRIPT_NAME --analyze <report_file>
+    $SCRIPT_NAME --version
+    $SCRIPT_NAME --help
+
+${GREEN}OPTIONS:${NC}
+    -h, --help              Show this help message
+    -V, --version           Show version information
+    -v, --verbose           Enable verbose output
+    -q, --quiet             Suppress MemRogue output (errors only)
+    
+    ${YELLOW}Output Options:${NC}
+    -o, --output=FILE       Write report to FILE (default: stderr)
+    -f, --format=FORMAT     Output format: text, json, csv (default: text)
+    
+    ${YELLOW}Detection Options:${NC}
+    -d, --depth=N           Stack trace depth (default: 16)
+    -s, --sampling=RATE     Sampling rate 0.0-1.0 (default: 1.0 = all)
+    --no-leaks              Disable leak detection
+    --no-double-free        Disable double-free detection
+    --no-invalid-free       Disable invalid-free detection
+    
+    ${YELLOW}Analysis Options:${NC}
+    --analyze=FILE          Analyze an existing JSON report file
+    --summary               Show only summary (no individual leaks)
+
+${GREEN}EXAMPLES:${NC}
+    # Basic usage - run program with memory debugging
+    $SCRIPT_NAME ./my_program arg1 arg2
+
+    # Save report to JSON file
+    $SCRIPT_NAME -f json -o report.json ./my_program
+
+    # Quick check with reduced output
+    $SCRIPT_NAME -q --summary ./my_program
+
+    # Custom stack trace depth
+    $SCRIPT_NAME -d 32 ./my_program
+
+    # Analyze existing report
+    $SCRIPT_NAME --analyze report.json
+
+${GREEN}ENVIRONMENT VARIABLES:${NC}
+    MEMROGUE_OUTPUT_FILE    Default output file
+    MEMROGUE_OUTPUT_FORMAT  Default format (text/json/csv)
+    MEMROGUE_STACK_DEPTH    Default stack trace depth
+    MEMROGUE_SAMPLING_RATE  Default sampling rate
+    MEMROGUE_ENABLED        Set to 0 to disable (passthrough mode)
+
+${GREEN}SUPPORTED PLATFORMS:${NC}
+    - Linux (glibc-based distributions)
+    - Tested on: Ubuntu, Debian, Fedora, CentOS, Arch Linux
+
+For more information, visit: https://github.com/7amo10/MemRogue
+EOF
+    exit 0
+}
+
+version() {
+    echo "MemRogue version $VERSION"
+    echo "Copyright (c) 2024-2025 MemRogue Team"
+    echo "License: MIT"
+    exit 0
+}
+
+error() {
+    echo -e "${RED}Error:${NC} $1" >&2
+    exit 1
+}
+
+warn() {
+    if [[ $QUIET -eq 0 ]]; then
+        echo -e "${YELLOW}Warning:${NC} $1" >&2
+    fi
+}
+
+info() {
+    if [[ $VERBOSE -eq 1 ]]; then
+        echo -e "${BLUE}Info:${NC} $1" >&2
+    fi
+}
+
+# Parse command line arguments
+PROGRAM=""
+PROGRAM_ARGS=()
+ANALYZE_FILE=""
+NO_LEAKS=0
+NO_DOUBLE_FREE=0
+NO_INVALID_FREE=0
+SUMMARY_ONLY=0
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            usage
+            ;;
+        -V|--version)
+            version
+            ;;
+        -v|--verbose)
+            VERBOSE=1
+            shift
+            ;;
+        -q|--quiet)
+            QUIET=1
+            shift
+            ;;
+        -o|--output)
+            OUTPUT_FILE="$2"
+            shift 2
+            ;;
+        --output=*)
+            OUTPUT_FILE="${1#*=}"
+            shift
+            ;;
+        -f|--format)
+            OUTPUT_FORMAT="$2"
+            shift 2
+            ;;
+        --format=*)
+            OUTPUT_FORMAT="${1#*=}"
+            shift
+            ;;
+        -d|--depth)
+            STACK_DEPTH="$2"
+            shift 2
+            ;;
+        --depth=*)
+            STACK_DEPTH="${1#*=}"
+            shift
+            ;;
+        -s|--sampling)
+            SAMPLING_RATE="$2"
+            shift 2
+            ;;
+        --sampling=*)
+            SAMPLING_RATE="${1#*=}"
+            shift
+            ;;
+        --no-leaks)
+            NO_LEAKS=1
+            shift
+            ;;
+        --no-double-free)
+            NO_DOUBLE_FREE=1
+            shift
+            ;;
+        --no-invalid-free)
+            NO_INVALID_FREE=1
+            shift
+            ;;
+        --analyze)
+            ANALYZE_FILE="$2"
+            shift 2
+            ;;
+        --analyze=*)
+            ANALYZE_FILE="${1#*=}"
+            shift
+            ;;
+        --summary)
+            SUMMARY_ONLY=1
+            shift
+            ;;
+        --)
+            shift
+            PROGRAM="$1"
+            shift
+            PROGRAM_ARGS=("$@")
+            break
+            ;;
+        -*)
+            error "Unknown option: $1. Use --help for usage."
+            ;;
+        *)
+            PROGRAM="$1"
+            shift
+            PROGRAM_ARGS=("$@")
+            break
+            ;;
+    esac
+done
+
+# Handle analyze mode
+if [[ -n "$ANALYZE_FILE" ]]; then
+    REPORT_BIN=$(find_memrogue_report) || error "memrogue-report not found. Is MemRogue installed?"
+    
+    if [[ ! -f "$ANALYZE_FILE" ]]; then
+        error "Report file not found: $ANALYZE_FILE"
+    fi
+    
+    info "Analyzing report: $ANALYZE_FILE"
+    exec "$REPORT_BIN" "$ANALYZE_FILE"
+fi
+
+# Check if program is specified
+if [[ -z "$PROGRAM" ]]; then
+    echo -e "${RED}Error:${NC} No program specified." >&2
+    echo ""
+    echo "Usage: $SCRIPT_NAME [OPTIONS] <program> [args...]"
+    echo "Try '$SCRIPT_NAME --help' for more information."
+    exit 1
+fi
+
+# Check if program exists
+if ! command -v "$PROGRAM" &> /dev/null && [[ ! -x "$PROGRAM" ]]; then
+    error "Program not found or not executable: $PROGRAM"
+fi
+
+# Check if MemRogue is disabled
+if [[ "${MEMROGUE_ENABLED:-1}" == "0" ]]; then
+    warn "MemRogue disabled (MEMROGUE_ENABLED=0), running in passthrough mode"
+    exec "$PROGRAM" "${PROGRAM_ARGS[@]}"
+fi
+
+# Find MemRogue library
+MEMROGUE_LIB=$(find_memrogue_lib) || error "MemRogue library not found. Is MemRogue installed?
+Try: sudo ./scripts/install.sh --system
+Or:  ./scripts/install.sh --user"
+
+info "Using MemRogue library: $MEMROGUE_LIB"
+
+# Build environment
+export LD_PRELOAD="$MEMROGUE_LIB${LD_PRELOAD:+:$LD_PRELOAD}"
+
+# Configure MemRogue via environment variables
+if [[ -n "$OUTPUT_FILE" ]]; then
+    export MEMROGUE_OUTPUT_FILE="$OUTPUT_FILE"
+fi
+
+if [[ -n "$OUTPUT_FORMAT" ]]; then
+    export MEMROGUE_OUTPUT_FORMAT="$OUTPUT_FORMAT"
+fi
+
+if [[ -n "$STACK_DEPTH" ]]; then
+    export MEMROGUE_STACK_DEPTH="$STACK_DEPTH"
+fi
+
+if [[ -n "$SAMPLING_RATE" ]]; then
+    export MEMROGUE_SAMPLING_RATE="$SAMPLING_RATE"
+fi
+
+if [[ $NO_LEAKS -eq 1 ]]; then
+    export MEMROGUE_DETECT_LEAKS=0
+fi
+
+if [[ $NO_DOUBLE_FREE -eq 1 ]]; then
+    export MEMROGUE_DETECT_DOUBLE_FREE=0
+fi
+
+if [[ $NO_INVALID_FREE -eq 1 ]]; then
+    export MEMROGUE_DETECT_INVALID_FREE=0
+fi
+
+if [[ $SUMMARY_ONLY -eq 1 ]]; then
+    export MEMROGUE_SUMMARY_ONLY=1
+fi
+
+if [[ $QUIET -eq 1 ]]; then
+    export MEMROGUE_QUIET=1
+fi
+
+# Print header if not quiet
+if [[ $QUIET -eq 0 && $VERBOSE -eq 1 ]]; then
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║              MemRogue Memory Debugger v${VERSION}                   ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${GREEN}Running:${NC} $PROGRAM ${PROGRAM_ARGS[*]}"
+    echo -e "${GREEN}Library:${NC} $MEMROGUE_LIB"
+    [[ -n "$OUTPUT_FILE" ]] && echo -e "${GREEN}Output:${NC} $OUTPUT_FILE ($OUTPUT_FORMAT)"
+    echo ""
+fi
+
+# Run the program with MemRogue
+exec "$PROGRAM" "${PROGRAM_ARGS[@]}"

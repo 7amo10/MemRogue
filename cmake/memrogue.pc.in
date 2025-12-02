@@ -1,0 +1,13 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@/memrogue
+
+Name: MemRogue
+Description: A lightweight memory debugging tool for C/C++ applications
+Version: @MEMROGUE_VERSION@
+URL: https://github.com/7amo10/MemRogue
+
+Requires:
+Libs: -L${libdir} -lmemrogue_intercept -lpthread -ldl
+Cflags: -I${includedir}

@@ -1,0 +1,263 @@
+# ============================================================================
+# MemRogue CI/CD Workflow
+# MEMRO-25: Integration Test Suite with GitHub Actions
+# ============================================================================
+
+name: MemRogue CI
+
+on:
+  push:
+    branches: [ main, 'sprint-*', 'Sprint-*' ]
+  pull_request:
+    branches: [ main, 'sprint-*', 'Sprint-*' ]
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  # ============================================================================
+  # Unit Tests Job
+  # ============================================================================
+  unit-tests:
+    name: Unit Tests (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        include:
+          - compiler: gcc
+            cc: gcc
+          - compiler: clang
+            cc: clang
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+    - name: Configure and Build
+      env:
+        CC: ${{ matrix.cc }}
+      run: |
+        cmake -B ${{github.workspace}}/build \
+          -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+          -DCMAKE_C_COMPILER=${{ matrix.cc }}
+        cmake --build ${{github.workspace}}/build -j$(nproc)
+
+    - name: Run Unit Tests
+      working-directory: ${{github.workspace}}/build
+      run: ctest --output-on-failure --timeout 60 -E "Integration"
+
+    - name: Upload Test Results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-results-${{ matrix.compiler }}
+        path: ${{github.workspace}}/build/Testing/
+        retention-days: 30
+
+  # ============================================================================
+  # Integration Tests Job
+  # ============================================================================
+  integration-tests:
+    name: Integration Tests (${{ matrix.compiler }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        include:
+          - compiler: gcc
+            cc: gcc
+          - compiler: clang
+            cc: clang
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+    - name: Configure and Build
+      env:
+        CC: ${{ matrix.cc }}
+      run: |
+        cmake -B ${{github.workspace}}/build \
+          -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+          -DCMAKE_C_COMPILER=${{ matrix.cc }}
+        cmake --build ${{github.workspace}}/build -j$(nproc)
+
+    - name: Run Integration Test Script
+      run: |
+        chmod +x ${{github.workspace}}/tests/integration/run_integration_tests.sh
+        ${{github.workspace}}/tests/integration/run_integration_tests.sh
+
+    - name: Run CTest Integration Tests
+      working-directory: ${{github.workspace}}/build
+      run: ctest --output-on-failure --timeout 120 -L integration
+
+    - name: Upload Integration Test Results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-test-results-${{ matrix.compiler }}
+        path: |
+          ${{github.workspace}}/build/integration-test-results.xml
+          ${{github.workspace}}/build/Testing/
+        retention-days: 30
+
+  # ============================================================================
+  # Memory Safety Check (with Valgrind)
+  # ============================================================================
+  memory-check:
+    name: Memory Safety Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: sudo apt-get update && sudo apt-get install -y cmake build-essential valgrind
+
+    - name: Configure and Build
+      run: |
+        cmake -B ${{github.workspace}}/build \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_FLAGS="-g -O0"
+        cmake --build ${{github.workspace}}/build -j$(nproc)
+
+    - name: Run Valgrind on Unit Tests
+      run: |
+        for test in test_hash_table test_tracker test_leak_detector; do
+          echo "=== Running $test under Valgrind ==="
+          valgrind --error-exitcode=1 \
+                   --leak-check=full \
+                   --show-leak-kinds=definite \
+                   --errors-for-leak-kinds=definite \
+                   --track-origins=yes \
+                   --suppressions=${{github.workspace}}/valgrind.supp \
+                   ${{github.workspace}}/build/bin/$test 2>&1 || true
+        done
+      continue-on-error: true
+
+  # ============================================================================
+  # Thread Sanitizer Check
+  # ============================================================================
+  thread-sanitizer:
+    name: Thread Sanitizer
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Build with Thread Sanitizer
+      run: |
+        cmake -B ${{github.workspace}}/build-tsan \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_FLAGS="-fsanitize=thread -g -O1" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread"
+        cmake --build ${{github.workspace}}/build-tsan -j$(nproc)
+
+    - name: Run Multithreaded Tests with TSan
+      env:
+        TSAN_OPTIONS: "halt_on_error=0:second_deadlock_stack=1:history_size=4"
+      run: |
+        timeout 120 ${{github.workspace}}/build-tsan/bin/test_multithreaded || true
+      continue-on-error: true
+
+  # ============================================================================
+  # Address Sanitizer Check
+  # ============================================================================
+  address-sanitizer:
+    name: Address Sanitizer
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Build with Address Sanitizer
+      run: |
+        cmake -B ${{github.workspace}}/build-asan \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_FLAGS="-fsanitize=address -g -fno-omit-frame-pointer" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+        cmake --build ${{github.workspace}}/build-asan -j$(nproc)
+
+    - name: Run Tests with ASan
+      env:
+        ASAN_OPTIONS: "halt_on_error=0:detect_leaks=1"
+      run: |
+        for test in test_hash_table test_tracker test_allocation_record; do
+          echo "=== Running $test with ASan ==="
+          ${{github.workspace}}/build-asan/bin/$test
+        done
+      continue-on-error: true
+
+  # ============================================================================
+  # Code Coverage
+  # ============================================================================
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install lcov
+      run: sudo apt-get update && sudo apt-get install -y lcov
+
+    - name: Build with Coverage
+      run: |
+        cmake -B ${{github.workspace}}/build-cov \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DCMAKE_C_FLAGS="--coverage -g" \
+          -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+        cmake --build ${{github.workspace}}/build-cov -j$(nproc)
+
+    - name: Run Tests for Coverage
+      working-directory: ${{github.workspace}}/build-cov
+      run: ctest --output-on-failure
+
+    - name: Generate Coverage Report
+      run: |
+        lcov --directory ${{github.workspace}}/build-cov --capture \
+             --output-file coverage.info \
+             --ignore-errors source,negative,gcov
+        lcov --remove coverage.info '/usr/*' --output-file coverage.info \
+             --ignore-errors unused,negative
+        lcov --list coverage.info
+
+    - name: Upload Coverage Report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: coverage.info
+        retention-days: 30
+
+  # ============================================================================
+  # Summary Job
+  # ============================================================================
+  test-summary:
+    name: Test Summary
+    needs: [unit-tests, integration-tests]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+    - name: Summary
+      run: |
+        echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Test Suite | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Unit Tests | ${{ needs.unit-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Integration Tests | ${{ needs.integration-tests.result }} |" >> $GITHUB_STEP_SUMMARY

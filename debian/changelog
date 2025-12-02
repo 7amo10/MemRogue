@@ -1,0 +1,11 @@
+memrogue (1.0.0-1) unstable; urgency=medium
+
+  * Initial release
+  * Memory leak detection with configurable stack trace depth
+  * Double free detection with detailed error reporting
+  * Invalid free detection
+  * JSON and CSV report format support
+  * Easy-to-use wrapper script for LD_PRELOAD integration
+  * Comprehensive documentation and examples
+
+ -- MemRogue Team <a8087027@gmail.com>  Tue, 02 Dec 2025 11:00:00 +0000

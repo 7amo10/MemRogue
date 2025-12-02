@@ -1,0 +1,5 @@
+usr/bin/memrogue
+usr/bin/memrogue-report
+usr/lib/*/libmemrogue_intercept.so*
+usr/share/doc/memrogue/
+usr/share/memrogue/
