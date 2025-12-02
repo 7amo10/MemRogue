@@ -345,9 +345,9 @@ jobs:
         rpmdev-setuptree
         VERSION=${{ steps.version.outputs.version }}
         
-        # Create source tarball
+        # Create source tarball (include tools/ directory for memrogue-report)
         mkdir -p memrogue-${VERSION}
-        cp -r src include cmake CMakeLists.txt LICENSE README.md scripts memrogue-${VERSION}/
+        cp -r src include cmake tools CMakeLists.txt LICENSE README.md scripts memrogue-${VERSION}/
         tar -czvf ~/rpmbuild/SOURCES/memrogue-${VERSION}.tar.gz memrogue-${VERSION}
         
         # Update spec file version and copy
