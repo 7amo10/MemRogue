@@ -58,12 +58,14 @@ for building applications that use the MemRogue API directly.
 %{_bindir}/memrogue
 %{_bindir}/memrogue-report
 %{_libdir}/libmemrogue_intercept.so.*
-%{_datadir}/memrogue/
-%{_docdir}/memrogue/
+# CMake installs docs to MemRogue (capital M) - include them to avoid unpackaged file errors
+%dir %{_docdir}/MemRogue
+%{_docdir}/MemRogue/README.md
+%{_docdir}/MemRogue/LICENSE
 
 %files devel
 %{_includedir}/memrogue/
-%{_libdir}/libmemrogue_core.a
+%{_libdir}/libmemrogue_core.so*
 %{_libdir}/libmemrogue_intercept.so
 %{_libdir}/pkgconfig/memrogue.pc
 %{_libdir}/cmake/MemRogue/
