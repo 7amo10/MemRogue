@@ -367,6 +367,7 @@ See [examples/analyze_leaks.py](examples/analyze_leaks.py) for the full script.
 | [API.md](docs/API.md) | Complete API reference |
 | [CONFIGURATION.md](docs/CONFIGURATION.md) | Configuration reference |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions |
+| [Examples README](examples/README.md) | Example applications guide and usage |
 
 ---
 
