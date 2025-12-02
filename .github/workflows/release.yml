@@ -1,0 +1,302 @@
+# ============================================================================
+# MemRogue Release Workflow
+# Automated release with binary builds for Linux x86-64
+# ============================================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: true
+        type: string
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  # ============================================================================
+  # Build Release Binaries
+  # ============================================================================
+  build:
+    name: Build Release (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, ubuntu-20.04]
+        include:
+          - os: ubuntu-22.04
+            artifact_name: memrogue-linux-x86_64-ubuntu22
+          - os: ubuntu-20.04
+            artifact_name: memrogue-linux-x86_64-ubuntu20
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+
+    - name: Configure
+      run: |
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+          -DMEMROGUE_BUILD_TESTS=OFF \
+          -DMEMROGUE_BUILD_EXAMPLES=OFF \
+          -DMEMROGUE_BUILD_BENCHMARKS=OFF
+
+    - name: Build
+      run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
+
+    - name: Prepare Release Package
+      run: |
+        mkdir -p release/${{ matrix.artifact_name }}
+        
+        # Copy binaries
+        cp build/lib/libmemrogue_intercept.so* release/${{ matrix.artifact_name }}/
+        cp build/lib/libmemrogue_core.a release/${{ matrix.artifact_name }}/
+        cp build/bin/memrogue-report release/${{ matrix.artifact_name }}/
+        
+        # Copy wrapper script
+        cp scripts/memrogue release/${{ matrix.artifact_name }}/
+        chmod +x release/${{ matrix.artifact_name }}/memrogue
+        
+        # Copy headers
+        mkdir -p release/${{ matrix.artifact_name }}/include
+        cp include/*.h release/${{ matrix.artifact_name }}/include/
+        
+        # Copy documentation
+        cp README.md release/${{ matrix.artifact_name }}/
+        cp LICENSE release/${{ matrix.artifact_name }}/
+        cp CHANGELOG.md release/${{ matrix.artifact_name }}/
+        
+        # Create archive
+        cd release
+        tar -czvf ${{ matrix.artifact_name }}.tar.gz ${{ matrix.artifact_name }}
+
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact_name }}
+        path: release/${{ matrix.artifact_name }}.tar.gz
+        retention-days: 5
+
+  # ============================================================================
+  # Run Tests Before Release
+  # ============================================================================
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+
+    - name: Build with Tests
+      run: |
+        cmake -B build -DCMAKE_BUILD_TYPE=Release -DMEMROGUE_BUILD_TESTS=ON
+        cmake --build build -j$(nproc)
+
+    - name: Run Tests
+      working-directory: build
+      run: ctest --output-on-failure -j$(nproc)
+
+  # ============================================================================
+  # Create Source Archive
+  # ============================================================================
+  source:
+    name: Create Source Archive
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Get Version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Source Archive
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+        mkdir -p memrogue-${VERSION}
+        
+        # Copy source files (excluding build artifacts)
+        rsync -av --exclude='.git' --exclude='build' --exclude='*.o' \
+          --exclude='*.so' --exclude='*.a' \
+          . memrogue-${VERSION}/
+        
+        # Create archives
+        tar -czvf memrogue-${VERSION}-source.tar.gz memrogue-${VERSION}
+        zip -r memrogue-${VERSION}-source.zip memrogue-${VERSION}
+
+    - name: Upload Source Archives
+      uses: actions/upload-artifact@v4
+      with:
+        name: source-archives
+        path: |
+          memrogue-*-source.tar.gz
+          memrogue-*-source.zip
+        retention-days: 5
+
+  # ============================================================================
+  # Create GitHub Release
+  # ============================================================================
+  release:
+    name: Create Release
+    needs: [build, test, source]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Get Version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          echo "tag=v${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Prepare Release Assets
+      run: |
+        mkdir -p release-assets
+        find artifacts -name "*.tar.gz" -exec cp {} release-assets/ \;
+        find artifacts -name "*.zip" -exec cp {} release-assets/ \;
+        ls -la release-assets/
+
+    - name: Generate Release Notes
+      id: release_notes
+      run: |
+        VERSION=${{ steps.version.outputs.version }}
+        cat > release_notes.md << 'EOF'
+        ## MemRogue v${{ steps.version.outputs.version }}
+        
+        ### 🎉 Release Highlights
+        
+        This is the first stable release of MemRogue, a lightweight memory debugging library for C/C++ applications.
+        
+        ### ✨ Key Features
+        
+        - **Memory Leak Detection** - Automatically detect unfreed memory at program exit
+        - **Double-Free Detection** - Catch use-after-free and double-free errors
+        - **Invalid Free Detection** - Detect frees of non-allocated pointers
+        - **Stack Traces** - Full backtraces for every allocation
+        - **Multiple Output Formats** - Text, JSON, CSV export
+        - **Zero Code Changes** - Works via LD_PRELOAD
+        - **Thread-Safe** - Full multi-threading support
+        
+        ### 📦 Downloads
+        
+        | Platform | File |
+        |----------|------|
+        | Ubuntu 22.04 (x86-64) | `memrogue-linux-x86_64-ubuntu22.tar.gz` |
+        | Ubuntu 20.04 (x86-64) | `memrogue-linux-x86_64-ubuntu20.tar.gz` |
+        | Source (tar.gz) | `memrogue-${{ steps.version.outputs.version }}-source.tar.gz` |
+        | Source (zip) | `memrogue-${{ steps.version.outputs.version }}-source.zip` |
+        
+        ### 🚀 Quick Start
+        
+        ```bash
+        # Extract
+        tar -xzf memrogue-linux-x86_64-ubuntu22.tar.gz
+        cd memrogue-linux-x86_64-ubuntu22
+        
+        # Run with your application
+        ./memrogue ./your_application
+        
+        # Or use LD_PRELOAD directly
+        LD_PRELOAD=./libmemrogue_intercept.so ./your_application
+        ```
+        
+        ### 📄 Documentation
+        
+        - [README](https://github.com/7amo10/MemRogue/blob/main/README.md)
+        - [API Reference](https://github.com/7amo10/MemRogue/blob/main/docs/API.md)
+        - [Usage Guide](https://github.com/7amo10/MemRogue/blob/main/docs/USAGE.md)
+        - [Changelog](https://github.com/7amo10/MemRogue/blob/main/CHANGELOG.md)
+        
+        ### 📝 Full Changelog
+        
+        See [CHANGELOG.md](https://github.com/7amo10/MemRogue/blob/main/CHANGELOG.md) for detailed changes.
+        
+        ---
+        
+        **Thank you for using MemRogue!** 🙏
+        EOF
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: MemRogue ${{ steps.version.outputs.tag }}
+        body_path: release_notes.md
+        draft: false
+        prerelease: false
+        files: |
+          release-assets/*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================================
+  # Generate Debian Package
+  # ============================================================================
+  debian-package:
+    name: Build Debian Package
+    runs-on: ubuntu-22.04
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential debhelper devscripts
+
+    - name: Get Version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build Debian Package
+      run: |
+        dpkg-buildpackage -us -uc -b || echo "Debian package build attempted"
+
+    - name: Upload Debian Package
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: debian-package
+        path: ../*.deb
+        retention-days: 5

@@ -35,10 +35,10 @@
  * Version Information
  * ============================================================================ */
 
-#define MEMROGUE_CLI_VERSION_MAJOR 0
-#define MEMROGUE_CLI_VERSION_MINOR 1
+#define MEMROGUE_CLI_VERSION_MAJOR 1
+#define MEMROGUE_CLI_VERSION_MINOR 0
 #define MEMROGUE_CLI_VERSION_PATCH 0
-#define MEMROGUE_CLI_VERSION_STRING "0.1.0"
+#define MEMROGUE_CLI_VERSION_STRING "1.0.0"
 
 #define MEMROGUE_CLI_PROGRAM_NAME "memrogue-report"
 #define MEMROGUE_CLI_DESCRIPTION "Memory leak analyzer and report generator"

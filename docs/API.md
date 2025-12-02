@@ -1118,10 +1118,10 @@ typedef struct {
 
 ```c
 // From memrogue_cli.h
-#define MEMROGUE_VERSION_MAJOR 0
-#define MEMROGUE_VERSION_MINOR 1
+#define MEMROGUE_VERSION_MAJOR 1
+#define MEMROGUE_VERSION_MINOR 0
 #define MEMROGUE_VERSION_PATCH 0
-#define MEMROGUE_VERSION_STRING "0.1.0"
+#define MEMROGUE_VERSION_STRING "1.0.0"
 ```
 
 ---

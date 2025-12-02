@@ -294,7 +294,7 @@ includedir=\${prefix}/include
 
 Name: MemRogue
 Description: Lightweight Memory Debugging Library for C/C++
-Version: 0.1.0
+Version: 1.0.0
 Libs: -L\${libdir} -lmemrogue_core -lpthread
 Cflags: -I\${includedir}/memrogue
 EOF
