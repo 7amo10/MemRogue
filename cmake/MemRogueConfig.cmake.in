@@ -1,0 +1,16 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/MemRogueTargets.cmake")
+
+# Provide useful variables
+set(MEMROGUE_INCLUDE_DIRS "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@/memrogue")
+set(MEMROGUE_LIBRARIES MemRogue::intercept MemRogue::core)
+set(MEMROGUE_VERSION "@MEMROGUE_VERSION@")
+
+# Provide convenience function
+function(memrogue_enable_debugging target)
+    target_link_libraries(${target} PRIVATE MemRogue::core)
+    target_compile_options(${target} PRIVATE -rdynamic)
+endfunction()
+
+check_required_components(MemRogue)
