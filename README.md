@@ -42,8 +42,8 @@ MemRogue is a high-performance memory debugging and leak detection library desig
 ### 1. Build MemRogue
 
 ```bash
-git clone https://github.com/yourusername/memrogue.git
-cd memrogue
+git clone https://github.com/7amo10/MemRogue.git
+cd MemRogue
 mkdir build && cd build
 cmake ..
 make
@@ -52,61 +52,173 @@ make
 ### 2. Run Your Application with MemRogue
 
 ```bash
-# Basic usage with LD_PRELOAD
-LD_PRELOAD=./lib/libmemrogue.so ./your_application
+# Easy way - use the memrogue wrapper script
+./scripts/memrogue ./your_application
+
+# Or with LD_PRELOAD directly
+LD_PRELOAD=./build/lib/libmemrogue_intercept.so ./your_application
 
 # Enable verbose output
-MEMROGUE_VERBOSITY=2 LD_PRELOAD=./lib/libmemrogue.so ./your_application
+./scripts/memrogue -v ./your_application
 
-# Save report to file
-MEMROGUE_OUTPUT=leaks.txt LD_PRELOAD=./lib/libmemrogue.so ./your_application
+# Save report to JSON file
+./scripts/memrogue -f json -o leaks.json ./your_application
 ```
 
 ### 3. Analyze the Results
 
 ```bash
 # Generate a detailed report
-./bin/memrogue-report --format=text --output=report.txt
+./build/bin/memrogue-report --format=text --output=report.txt
 
 # Export to JSON for programmatic analysis
-./bin/memrogue-report --format=json --output=report.json
+./build/bin/memrogue-report --format=json --output=report.json
 
 # Export to CSV for spreadsheet analysis
-./bin/memrogue-report --format=csv --output=report.csv
+./build/bin/memrogue-report --format=csv --output=report.csv
 ```
 
 ---
 
 ## Installation
 
-### Prerequisites
-
-- **Compiler**: GCC 7+ or Clang 6+ with C11/C17 support
-- **Build System**: CMake 3.10+
-- **Platform**: Linux (x86_64, ARM64)
-- **Optional**: libunwind (for enhanced stack traces)
-
-### Building from Source
+### Quick Install (Recommended)
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/memrogue.git
-cd memrogue
-
-# Create build directory
+# Clone and build
+git clone https://github.com/7amo10/MemRogue.git
+cd MemRogue
 mkdir build && cd build
-
-# Configure with CMake
 cmake .. -DCMAKE_BUILD_TYPE=Release
-
-# Build
 make -j$(nproc)
 
-# Run tests
-make test
+# Install system-wide (requires sudo)
+sudo ../scripts/install.sh --system
 
-# Install (optional)
+# Or install for current user only (no sudo needed)
+../scripts/install.sh --user
+```
+
+After installation, use MemRogue anywhere:
+```bash
+memrogue ./your_application
+```
+
+### Installation Methods
+
+#### Method 1: Install Script (Recommended)
+
+The install script automatically detects your system and installs MemRogue:
+
+```bash
+# System-wide installation (/usr/local)
+sudo ./scripts/install.sh --system
+
+# User-local installation (~/.local)
+./scripts/install.sh --user
+
+# Custom prefix
+./scripts/install.sh --prefix=/opt/memrogue
+
+# Interactive mode (asks for options)
+./scripts/install.sh
+```
+
+**Supported Distributions:**
+- Debian/Ubuntu
+- RHEL/CentOS/Fedora
+- Arch Linux
+- Alpine Linux
+- Any Linux with GCC and CMake
+
+#### Method 2: CMake Install
+
+```bash
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+make -j$(nproc)
 sudo make install
+```
+
+#### Method 3: Package Managers
+
+**Debian/Ubuntu (.deb):**
+```bash
+# Build the package
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+cpack -G DEB
+
+# Install
+sudo dpkg -i memrogue-1.0.0-Linux.deb
+```
+
+**Fedora/RHEL/CentOS (.rpm):**
+```bash
+# Build the package
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+cpack -G RPM
+
+# Install
+sudo rpm -ivh memrogue-1.0.0-Linux.rpm
+```
+
+**From Source (Manual):**
+```bash
+# Build
+git clone https://github.com/7amo10/MemRogue.git
+cd MemRogue
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+
+# Install
+sudo make install
+sudo ldconfig
+```
+
+### Uninstallation
+
+```bash
+# If installed via install script
+sudo ./scripts/uninstall.sh --system
+# Or for user installation
+./scripts/uninstall.sh --user
+
+# If installed via CMake
+sudo make uninstall
+
+# If installed via package manager
+sudo dpkg -r memrogue        # Debian/Ubuntu
+sudo rpm -e memrogue         # Fedora/RHEL
+```
+
+### Prerequisites
+
+| Requirement | Minimum Version | Notes |
+|-------------|-----------------|-------|
+| **GCC** | 7.0+ | Or Clang 6.0+ |
+| **CMake** | 3.15+ | Build system |
+| **glibc** | 2.17+ | Linux C library |
+| **pthreads** | - | Thread support |
+
+**Installing Prerequisites:**
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install build-essential cmake
+
+# Fedora/RHEL
+sudo dnf install gcc gcc-c++ cmake make
+
+# Arch Linux
+sudo pacman -S base-devel cmake
+
+# Alpine
+apk add build-base cmake
 ```
 
 ### CMake Options
@@ -114,20 +226,79 @@ sudo make install
 | Option | Default | Description |
 |--------|---------|-------------|
 | `CMAKE_BUILD_TYPE` | `Debug` | Build type: `Debug`, `Release`, `RelWithDebInfo` |
-| `BUILD_TESTS` | `ON` | Build unit tests |
-| `BUILD_EXAMPLES` | `ON` | Build example applications |
-| `ENABLE_SANITIZERS` | `OFF` | Enable AddressSanitizer/UBSan |
+| `MEMROGUE_BUILD_TESTS` | `ON` | Build unit tests |
+| `MEMROGUE_BUILD_EXAMPLES` | `ON` | Build example applications |
+| `MEMROGUE_BUILD_BENCHMARKS` | `ON` | Build performance benchmarks |
+| `MEMROGUE_ENABLE_COVERAGE` | `OFF` | Enable code coverage reporting |
+
+### Verifying Installation
+
+```bash
+# Check if memrogue is available
+which memrogue
+memrogue --version
+
+# Test with a simple program
+cat > test.c << 'EOF'
+#include <stdlib.h>
+int main() {
+    void *p = malloc(100);  // Intentional leak
+    return 0;
+}
+EOF
+gcc -o test test.c
+memrogue ./test
+```
 
 ---
 
 ## Usage
 
-### Method 1: LD_PRELOAD (Recommended)
+### Method 1: memrogue Wrapper (Easiest)
 
-The simplest way to use MemRogue is via `LD_PRELOAD`, which requires no changes to your application:
+The `memrogue` command is the easiest way to debug your applications:
 
 ```bash
-LD_PRELOAD=/path/to/libmemrogue.so ./your_application
+# Basic usage
+memrogue ./your_application
+
+# With arguments
+memrogue ./your_application arg1 arg2
+
+# Save report to JSON file
+memrogue -f json -o report.json ./your_application
+
+# Verbose mode with detailed output
+memrogue -v ./your_application
+
+# Quick check (quiet mode, summary only)
+memrogue -q --summary ./your_application
+
+# Custom stack trace depth
+memrogue -d 32 ./your_application
+
+# Analyze existing JSON report
+memrogue --analyze report.json
+```
+
+**memrogue Options:**
+| Option | Description |
+|--------|-------------|
+| `-h, --help` | Show help message |
+| `-v, --verbose` | Enable verbose output |
+| `-q, --quiet` | Suppress output (errors only) |
+| `-o, --output=FILE` | Write report to file |
+| `-f, --format=FMT` | Output format: text, json, csv |
+| `-d, --depth=N` | Stack trace depth (default: 16) |
+| `--no-leaks` | Disable leak detection |
+| `--summary` | Show only summary |
+
+### Method 2: LD_PRELOAD (Direct)
+
+Use LD_PRELOAD directly for more control:
+
+```bash
+LD_PRELOAD=/usr/local/lib/libmemrogue_intercept.so ./your_application
 ```
 
 ### Method 2: Link at Compile Time
