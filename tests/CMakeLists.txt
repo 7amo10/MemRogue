@@ -160,3 +160,46 @@ set_tests_properties(
     IntegrationReportFormats
     PROPERTIES LABELS "integration"
 )
+
+# ============================================================================
+# Stress Tests (MEMRO-28)
+# ============================================================================
+
+# Stress test executable
+add_executable(test_stress test_stress.c)
+target_link_libraries(test_stress PRIVATE pthread)
+target_link_options(test_stress PRIVATE -rdynamic)
+
+# Don't add to default CTest - stress tests should be run manually
+# Use: ./bin/test_stress or with MemRogue:
+# LD_PRELOAD=./lib/libmemrogue_intercept.so ./bin/test_stress
+
+# Custom target to run stress tests with safe defaults
+add_custom_target(stress_test
+    COMMAND ${CMAKE_COMMAND} -E echo "Running stress tests with SAFE defaults..."
+    COMMAND ${CMAKE_COMMAND} -E echo "Configure with environment variables for heavier testing."
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND $<TARGET_FILE:test_stress>
+    DEPENDS test_stress
+    COMMENT "Running stress tests (MEMRO-28)"
+)
+
+# Custom target to run stress tests with MemRogue interception
+add_custom_target(stress_test_memrogue
+    COMMAND ${CMAKE_COMMAND} -E echo "Running stress tests WITH MemRogue interception..."
+    COMMAND ${CMAKE_COMMAND} -E echo ""
+    COMMAND ${CMAKE_COMMAND} -E env LD_PRELOAD=$<TARGET_FILE:memrogue_intercept> $<TARGET_FILE:test_stress>
+    DEPENDS test_stress memrogue_intercept
+    COMMENT "Running stress tests with MemRogue (MEMRO-28)"
+)
+
+# Custom target for quick stress test (reduced load)
+add_custom_target(stress_test_quick
+    COMMAND ${CMAKE_COMMAND} -E echo "Running QUICK stress tests..."
+    COMMAND ${CMAKE_COMMAND} -E env 
+        STRESS_ALLOCATION_COUNT=100000 
+        STRESS_DURATION_MINUTES=1 
+        $<TARGET_FILE:test_stress>
+    DEPENDS test_stress
+    COMMENT "Running quick stress tests (MEMRO-28)"
+)
