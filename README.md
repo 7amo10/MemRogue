@@ -3,9 +3,12 @@
 <h1>MemRogue</h1>
 <p><strong>A Lightweight, Production-Ready Memory Debugging Library for C/C++</strong></p>
 
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/7amo10/MemRogue/releases/tag/v1.0.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/7amo10/MemRogue/actions/workflows/ci.yml/badge.svg)](https://github.com/7amo10/MemRogue/actions/workflows/ci.yml)
 [![C Standard](https://img.shields.io/badge/C-11%2F17-green.svg)](https://en.wikipedia.org/wiki/C11_(C_standard_revision))
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
+[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](https://github.com/7amo10/MemRogue)
+[![Tests](https://img.shields.io/badge/tests-28%20passing-brightgreen.svg)](https://github.com/7amo10/MemRogue/actions)
 
 [Quick Start](#quick-start) •
 [Documentation](#documentation) •
@@ -596,13 +599,16 @@ MemRogue is designed for minimal overhead:
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines:
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 
+Quick steps:
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Run tests: `make test`
+3. Make your changes and add tests
+4. Run tests: `ctest --output-on-failure`
 5. Submit a pull request
+
+For bugs and feature requests, please [open an issue](https://github.com/7amo10/MemRogue/issues).
 
 ---
 
@@ -616,6 +622,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Inspired by Valgrind, ASan, and other memory debugging tools
 - Built with modern C best practices
+- Project management powered by [Plane](https://plane.so)
 
 ---
 
