@@ -18,6 +18,7 @@ endif()
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(MEMROGUE_BUILD_TESTS "Build tests" ON)
 option(MEMROGUE_BUILD_EXAMPLES "Build examples" ON)
+option(MEMROGUE_BUILD_BENCHMARKS "Build performance benchmarks" ON)
 option(MEMROGUE_ENABLE_COVERAGE "Enable code coverage reporting" OFF)
 
 # Code Coverage Configuration
@@ -77,6 +78,11 @@ endif()
 # Examples
 if(MEMROGUE_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+# Benchmarks
+if(MEMROGUE_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
 
 # Coverage Report Target
