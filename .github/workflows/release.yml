@@ -61,7 +61,9 @@ jobs:
         
         # Copy binaries
         cp build/lib/libmemrogue_intercept.so* release/${{ matrix.artifact_name }}/
-        cp build/lib/libmemrogue_core.a release/${{ matrix.artifact_name }}/
+        # Static library may or may not exist depending on CMake config
+        cp build/lib/libmemrogue_core.a release/${{ matrix.artifact_name }}/ 2>/dev/null || true
+        cp build/lib/libmemrogue_core.so* release/${{ matrix.artifact_name }}/ 2>/dev/null || true
         cp build/bin/memrogue-report release/${{ matrix.artifact_name }}/
         
         # Copy wrapper script
@@ -292,11 +294,15 @@ jobs:
     - name: Build Debian Package
       run: |
         dpkg-buildpackage -us -uc -b || echo "Debian package build attempted"
+        # Move .deb files to workspace for artifact upload
+        mkdir -p debian-packages
+        cp ../*.deb debian-packages/ 2>/dev/null || true
 
     - name: Upload Debian Package
       uses: actions/upload-artifact@v4
-      if: success()
+      if: always()
       with:
         name: debian-package
-        path: ../*.deb
+        path: debian-packages/*.deb
+        if-no-files-found: ignore
         retention-days: 5
